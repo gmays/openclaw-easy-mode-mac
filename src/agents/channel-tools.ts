@@ -8,6 +8,7 @@ import {
 import type { ChannelAgentTool, ChannelMessageActionName } from "../channels/plugins/types.js";
 import { normalizeAnyChannelId } from "../channels/registry.js";
 import type { OpenClawConfig } from "../config/config.js";
+import { filterEasyModeTools } from "../easy-mode/policy.js";
 
 type ChannelAgentToolMeta = {
   channelId: string;
@@ -106,7 +107,7 @@ export function listChannelAgentTools(params: { cfg?: OpenClawConfig }): Channel
       tools.push(...resolved);
     }
   }
-  return tools;
+  return filterEasyModeTools(tools);
 }
 
 export function resolveChannelMessageToolHints(params: {

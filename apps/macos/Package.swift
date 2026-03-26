@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "OpenClawIPC", targets: ["OpenClawIPC"]),
         .library(name: "OpenClawDiscovery", targets: ["OpenClawDiscovery"]),
         .executable(name: "OpenClaw", targets: ["OpenClaw"]),
+        .executable(name: "OpenClawEasyModeMac", targets: ["OpenClawEasyModeMac"]),
         .executable(name: "openclaw-mac", targets: ["OpenClawMacCLI"]),
     ],
     dependencies: [
@@ -73,6 +74,20 @@ let package = Package(
                 .product(name: "OpenClawProtocol", package: "OpenClawKit"),
             ],
             path: "Sources/OpenClawMacCLI",
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency"),
+            ]),
+        .executableTarget(
+            name: "OpenClawEasyModeMac",
+            dependencies: [
+                .product(name: "OpenClawKit", package: "OpenClawKit"),
+                .product(name: "OpenClawChatUI", package: "OpenClawKit"),
+                .product(name: "OpenClawProtocol", package: "OpenClawKit"),
+            ],
+            path: "Sources/OpenClawEasyModeMac",
+            exclude: [
+                "Resources/Info.plist",
+            ],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),
             ]),

@@ -1,3 +1,4 @@
+import { filterEasyModeChannels } from "../../easy-mode/policy.js";
 import {
   getActivePluginChannelRegistryVersion,
   requireActivePluginChannelRegistry,
@@ -66,7 +67,7 @@ function resolveCachedChannelPlugins(): CachedChannelPlugins {
 }
 
 export function listChannelPlugins(): ChannelPlugin[] {
-  return resolveCachedChannelPlugins().sorted.slice();
+  return filterEasyModeChannels(resolveCachedChannelPlugins().sorted);
 }
 
 export function getChannelPlugin(id: ChannelId): ChannelPlugin | undefined {

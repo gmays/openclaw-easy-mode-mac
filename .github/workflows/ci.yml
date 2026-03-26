@@ -1027,6 +1027,18 @@ jobs:
           done
           exit 1
 
+      - name: Swift build Easy Mode (release)
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if swift build --package-path apps/macos --configuration release --product OpenClawEasyModeMac; then
+              exit 0
+            fi
+            echo "swift build Easy Mode failed (attempt $attempt/3). Retrying…"
+            sleep $((attempt * 20))
+          done
+          exit 1
+
       - name: Swift test
         run: |
           set -euo pipefail

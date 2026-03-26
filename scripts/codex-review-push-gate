@@ -98,7 +98,7 @@ async function main() {
     );
     for (const entry of result.blocked) {
       console.error(
-        `- ${entry.sha} status=${entry.status} severity=${entry.severity} findings=${entry.findings} reason=${entry.reason}`,
+        `- ${entry.sha} branch=${entry.branch || "unknown"} status=${entry.status} severity=${entry.severity} findings=${entry.findings} reason=${entry.reason}`,
       );
     }
     process.exit(1);

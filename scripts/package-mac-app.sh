@@ -2,13 +2,47 @@
 set -euo pipefail
 
 # Build and bundle OpenClaw into a minimal .app we can open.
-# Outputs to dist/OpenClaw.app
+# Outputs to dist/OpenClaw.app or dist/OpenClaw Easy Mode.app
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_ROOT="$ROOT_DIR/dist/OpenClaw.app"
 BUILD_ROOT="$ROOT_DIR/apps/macos/.build"
-PRODUCT="OpenClaw"
-BUNDLE_ID="${BUNDLE_ID:-ai.openclaw.mac.debug}"
+MAC_APP_PRODUCT="${MAC_APP_PRODUCT:-openclaw}"
+
+case "$MAC_APP_PRODUCT" in
+  openclaw)
+    PRODUCT="OpenClaw"
+    APP_DISPLAY_NAME="OpenClaw"
+    APP_ROOT="$ROOT_DIR/dist/OpenClaw.app"
+    APP_EXECUTABLE="OpenClaw"
+    INFO_PLIST_SRC="$ROOT_DIR/apps/macos/Sources/OpenClaw/Resources/Info.plist"
+    APP_ICON_SRC="$ROOT_DIR/apps/macos/Sources/OpenClaw/Resources/OpenClaw.icns"
+    BUNDLE_ID="${BUNDLE_ID:-ai.openclaw.mac.debug}"
+    INCLUDE_SPARKLE=1
+    INCLUDE_CONTROL_UI=1
+    INCLUDE_DEVICE_MODELS=1
+    INCLUDE_MODEL_CATALOG=1
+    INCLUDE_BUNDLED_RUNTIME=0
+    ;;
+  easy-mode)
+    PRODUCT="OpenClawEasyModeMac"
+    APP_DISPLAY_NAME="OpenClaw Easy Mode"
+    APP_ROOT="$ROOT_DIR/dist/OpenClaw Easy Mode.app"
+    APP_EXECUTABLE="OpenClawEasyModeMac"
+    INFO_PLIST_SRC="$ROOT_DIR/apps/macos/Sources/OpenClawEasyModeMac/Resources/Info.plist"
+    APP_ICON_SRC="$ROOT_DIR/apps/macos/Sources/OpenClaw/Resources/OpenClaw.icns"
+    BUNDLE_ID="${BUNDLE_ID:-ai.openclaw.easymode.mac.debug}"
+    INCLUDE_SPARKLE=0
+    INCLUDE_CONTROL_UI=0
+    INCLUDE_DEVICE_MODELS=0
+    INCLUDE_MODEL_CATALOG=0
+    INCLUDE_BUNDLED_RUNTIME=1
+    ;;
+  *)
+    echo "ERROR: Unsupported MAC_APP_PRODUCT '$MAC_APP_PRODUCT' (use openclaw or easy-mode)." >&2
+    exit 1
+    ;;
+esac
+
 PKG_VERSION="$(cd "$ROOT_DIR" && node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0")"
 BUILD_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 GIT_COMMIT=$(cd "$ROOT_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -32,7 +66,7 @@ PRIMARY_ARCH="${BUILD_ARCHS[0]}"
 SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-AGCY8w5vHirVfGGDGc8Szc5iuOqupZSh9pMj/Qs67XI=}"
 SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://raw.githubusercontent.com/openclaw/openclaw/main/appcast.xml}"
 AUTO_CHECKS=true
-if [[ "$BUNDLE_ID" == *.debug ]]; then
+if [[ "$INCLUDE_SPARKLE" != "1" || "$BUNDLE_ID" == *.debug ]]; then
   SPARKLE_FEED_URL=""
   AUTO_CHECKS=false
 fi
@@ -170,7 +204,6 @@ mkdir -p "$APP_ROOT/Contents/Resources"
 mkdir -p "$APP_ROOT/Contents/Frameworks"
 
 echo "📄 Copying Info.plist template"
-INFO_PLIST_SRC="$ROOT_DIR/apps/macos/Sources/OpenClaw/Resources/Info.plist"
 if [ ! -f "$INFO_PLIST_SRC" ]; then
   echo "ERROR: Info.plist template missing at $INFO_PLIST_SRC" >&2
   exit 1
@@ -192,20 +225,20 @@ else
 fi
 
 echo "🚚 Copying binary"
-cp "$BIN_PRIMARY" "$APP_ROOT/Contents/MacOS/OpenClaw"
+cp "$BIN_PRIMARY" "$APP_ROOT/Contents/MacOS/$APP_EXECUTABLE"
 if [[ "${#BUILD_ARCHS[@]}" -gt 1 ]]; then
   BIN_INPUTS=()
   for arch in "${BUILD_ARCHS[@]}"; do
     BIN_INPUTS+=("$(bin_for_arch "$arch")")
   done
-  /usr/bin/lipo -create "${BIN_INPUTS[@]}" -output "$APP_ROOT/Contents/MacOS/OpenClaw"
+  /usr/bin/lipo -create "${BIN_INPUTS[@]}" -output "$APP_ROOT/Contents/MacOS/$APP_EXECUTABLE"
 fi
-chmod +x "$APP_ROOT/Contents/MacOS/OpenClaw"
+chmod +x "$APP_ROOT/Contents/MacOS/$APP_EXECUTABLE"
 # SwiftPM outputs ad-hoc signed binaries; strip the signature before install_name_tool to avoid warnings.
-/usr/bin/codesign --remove-signature "$APP_ROOT/Contents/MacOS/OpenClaw" 2>/dev/null || true
+/usr/bin/codesign --remove-signature "$APP_ROOT/Contents/MacOS/$APP_EXECUTABLE" 2>/dev/null || true
 
 SPARKLE_FRAMEWORK_PRIMARY="$(sparkle_framework_for_arch "$PRIMARY_ARCH")"
-if [ -d "$SPARKLE_FRAMEWORK_PRIMARY" ]; then
+if [[ "$INCLUDE_SPARKLE" == "1" ]] && [ -d "$SPARKLE_FRAMEWORK_PRIMARY" ]; then
   echo "✨ Embedding Sparkle.framework"
   cp -R "$SPARKLE_FRAMEWORK_PRIMARY" "$APP_ROOT/Contents/Frameworks/"
   if [[ "${#BUILD_ARCHS[@]}" -gt 1 ]]; then
@@ -231,30 +264,36 @@ else
 fi
 
 echo "🖼  Copying app icon"
-cp "$ROOT_DIR/apps/macos/Sources/OpenClaw/Resources/OpenClaw.icns" "$APP_ROOT/Contents/Resources/OpenClaw.icns"
+cp "$APP_ICON_SRC" "$APP_ROOT/Contents/Resources/OpenClaw.icns"
 
-echo "📦 Copying device model resources"
-rm -rf "$APP_ROOT/Contents/Resources/DeviceModels"
-cp -R "$ROOT_DIR/apps/macos/Sources/OpenClaw/Resources/DeviceModels" "$APP_ROOT/Contents/Resources/DeviceModels"
-
-echo "📦 Copying model catalog"
-MODEL_CATALOG_SRC="$ROOT_DIR/node_modules/@mariozechner/pi-ai/dist/models.generated.js"
-MODEL_CATALOG_DEST="$APP_ROOT/Contents/Resources/models.generated.js"
-if [ -f "$MODEL_CATALOG_SRC" ]; then
-  cp "$MODEL_CATALOG_SRC" "$MODEL_CATALOG_DEST"
-else
-  echo "WARN: model catalog missing at $MODEL_CATALOG_SRC (continuing)" >&2
+if [[ "$INCLUDE_DEVICE_MODELS" == "1" ]]; then
+  echo "📦 Copying device model resources"
+  rm -rf "$APP_ROOT/Contents/Resources/DeviceModels"
+  cp -R "$ROOT_DIR/apps/macos/Sources/OpenClaw/Resources/DeviceModels" "$APP_ROOT/Contents/Resources/DeviceModels"
 fi
 
-echo "📦 Copying Control UI assets"
-CONTROL_UI_SRC="$ROOT_DIR/dist/control-ui"
-CONTROL_UI_DEST="$APP_ROOT/Contents/Resources/control-ui"
-if [ -d "$CONTROL_UI_SRC" ] && [ -f "$CONTROL_UI_SRC/index.html" ]; then
-  rm -rf "$CONTROL_UI_DEST"
-  cp -R "$CONTROL_UI_SRC" "$CONTROL_UI_DEST"
-else
-  echo "ERROR: Control UI assets missing at $CONTROL_UI_SRC. Run pnpm ui:build first." >&2
-  exit 1
+if [[ "$INCLUDE_MODEL_CATALOG" == "1" ]]; then
+  echo "📦 Copying model catalog"
+  MODEL_CATALOG_SRC="$ROOT_DIR/node_modules/@mariozechner/pi-ai/dist/models.generated.js"
+  MODEL_CATALOG_DEST="$APP_ROOT/Contents/Resources/models.generated.js"
+  if [ -f "$MODEL_CATALOG_SRC" ]; then
+    cp "$MODEL_CATALOG_SRC" "$MODEL_CATALOG_DEST"
+  else
+    echo "WARN: model catalog missing at $MODEL_CATALOG_SRC (continuing)" >&2
+  fi
+fi
+
+if [[ "$INCLUDE_CONTROL_UI" == "1" ]]; then
+  echo "📦 Copying Control UI assets"
+  CONTROL_UI_SRC="$ROOT_DIR/dist/control-ui"
+  CONTROL_UI_DEST="$APP_ROOT/Contents/Resources/control-ui"
+  if [ -d "$CONTROL_UI_SRC" ] && [ -f "$CONTROL_UI_SRC/index.html" ]; then
+    rm -rf "$CONTROL_UI_DEST"
+    cp -R "$CONTROL_UI_SRC" "$CONTROL_UI_DEST"
+  else
+    echo "ERROR: Control UI assets missing at $CONTROL_UI_SRC. Run pnpm ui:build first." >&2
+    exit 1
+  fi
 fi
 
 echo "📦 Copying OpenClawKit resources"
@@ -293,8 +332,24 @@ else
   fi
 fi
 
-echo "⏹  Stopping any running OpenClaw"
-killall -q OpenClaw 2>/dev/null || true
+if [[ "$INCLUDE_BUNDLED_RUNTIME" == "1" ]]; then
+  echo "📦 Copying bundled Easy Mode runtime"
+  mkdir -p "$APP_ROOT/Contents/Resources/openclaw-runtime/dist"
+  rm -rf "$APP_ROOT/Contents/Resources/openclaw-runtime/dist"
+  cp -R "$ROOT_DIR/dist" "$APP_ROOT/Contents/Resources/openclaw-runtime/"
+  NODE_PATH="$(node -p "process.execPath")"
+  if [ -x "$NODE_PATH" ]; then
+    mkdir -p "$APP_ROOT/Contents/Resources/runtime"
+    cp "$NODE_PATH" "$APP_ROOT/Contents/Resources/runtime/node"
+    chmod +x "$APP_ROOT/Contents/Resources/runtime/node"
+  else
+    echo "ERROR: Unable to resolve a Node runtime for Easy Mode packaging." >&2
+    exit 1
+  fi
+fi
+
+echo "⏹  Stopping any running $APP_EXECUTABLE"
+killall -q "$APP_EXECUTABLE" 2>/dev/null || true
 
 echo "🔏 Signing bundle (auto-selects signing identity if SIGN_IDENTITY is unset)"
 "$ROOT_DIR/scripts/codesign-mac-app.sh" "$APP_ROOT"

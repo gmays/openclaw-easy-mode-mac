@@ -154,6 +154,56 @@ describe("scripts/codex-review-push-gate-lib executePushGate", () => {
     expect(result.summary.blocked).toBe(0);
   });
 
+  it("does not let one branch dismissal suppress another branch in the same push", async () => {
+    const repo = makeRepo();
+    fs.writeFileSync(path.join(repo, "seed.txt"), "changed\n");
+    git(repo, "commit", "-am", "change");
+    const sha = git(repo, "rev-parse", "HEAD");
+    const previousSha = git(repo, "rev-parse", "HEAD^");
+    git(repo, "branch", "feature", sha);
+    const reviewsDir = path.join(repo, ".code-reviews");
+    const finding = {
+      severity: "major",
+      confidence: 0.95,
+      title: "Bug",
+      finding_id: "F-1",
+      hypothesis: "bug",
+      impact: "breakage",
+      evidence: [],
+      recommended_direction: "fix",
+    };
+    writeJson(path.join(reviewsDir, `${sha}.json`), {
+      schema_version: 2,
+      sha,
+      review_status: "ok",
+      summary: "action needed",
+      findings: [finding],
+    });
+    fs.writeFileSync(path.join(reviewsDir, `${sha}.md`), "# report\n", "utf8");
+
+    await appendDismissal({
+      repoRoot: repo,
+      branchName: "main",
+      sha,
+      signature: findingSignature(finding),
+    });
+
+    const result = await executePushGate({
+      repoRoot: repo,
+      reviewsDir,
+      stdinText: [
+        `refs/heads/main ${sha} refs/heads/main ${previousSha}`,
+        `refs/heads/feature ${sha} refs/heads/feature ${previousSha}`,
+      ].join("\n"),
+      minSeverity: "major",
+      gitExec: (args) => defaultGitExec(args, repo),
+    });
+
+    expect(result.summary.blocked).toBe(1);
+    expect(result.blocked[0]?.sha).toBe(sha);
+    expect(result.blocked[0]?.branch).toBe("feature");
+  });
+
   it("stores dismissals under the resolved git dir, not repoRoot/.git blindly", () => {
     const repo = makeRepo();
     const gitDir = git(repo, "rev-parse", "--path-format=absolute", "--git-dir");

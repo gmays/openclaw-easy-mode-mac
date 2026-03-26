@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { assertEasyModeAllowedRoot } from "../easy-mode/allowed-roots.js";
 import { assertNoWindowsNetworkPath } from "../infra/local-file-access.js";
 import { getDefaultMediaLocalRoots } from "./local-roots.js";
 
@@ -48,6 +49,8 @@ export async function assertLocalMediaAllowed(
   } catch {
     resolved = path.resolve(mediaPath);
   }
+
+  await assertEasyModeAllowedRoot(resolved, { label: "Local media path" });
 
   if (localRoots === undefined) {
     const workspaceRoot = roots.find((root) => path.basename(root) === "workspace");

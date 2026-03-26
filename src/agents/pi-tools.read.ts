@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { createEditTool, createReadTool, createWriteTool } from "@mariozechner/pi-coding-agent";
+import { assertEasyModeAllowedRoot } from "../easy-mode/allowed-roots.js";
 import {
   appendFileWithinRoot,
   SafeOpenError,
@@ -711,6 +712,7 @@ function createSandboxEditOperations(params: SandboxToolParams) {
 
 async function writeHostFile(absolutePath: string, content: string) {
   const resolved = path.resolve(absolutePath);
+  await assertEasyModeAllowedRoot(resolved, { label: "Write path" });
   await fs.mkdir(path.dirname(resolved), { recursive: true });
   await fs.writeFile(resolved, content, "utf-8");
 }
@@ -723,6 +725,7 @@ function createHostWriteOperations(root: string, options?: { workspaceOnly?: boo
     return {
       mkdir: async (dir: string) => {
         const resolved = path.resolve(dir);
+        await assertEasyModeAllowedRoot(resolved, { label: "Directory path" });
         await fs.mkdir(resolved, { recursive: true });
       },
       writeFile: writeHostFile,
@@ -757,11 +760,13 @@ function createHostEditOperations(root: string, options?: { workspaceOnly?: bool
     return {
       readFile: async (absolutePath: string) => {
         const resolved = path.resolve(absolutePath);
+        await assertEasyModeAllowedRoot(resolved, { label: "Read path" });
         return await fs.readFile(resolved);
       },
       writeFile: writeHostFile,
       access: async (absolutePath: string) => {
         const resolved = path.resolve(absolutePath);
+        await assertEasyModeAllowedRoot(resolved, { label: "Access path" });
         await fs.access(resolved);
       },
     } as const;

@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "../config/config.js";
+import { filterEasyModeTools } from "../easy-mode/policy.js";
 import { callGateway } from "../gateway/call.js";
 import { resolvePluginTools } from "../plugins/tools.js";
 import { getActiveRuntimeWebToolsMetadata } from "../secrets/runtime.js";
@@ -272,7 +273,7 @@ export function createOpenClawTools(
     allowGatewaySubagentBinding: options?.allowGatewaySubagentBinding,
   });
 
-  return [...tools, ...pluginTools];
+  return filterEasyModeTools([...tools, ...pluginTools]);
 }
 
 export const __testing = {

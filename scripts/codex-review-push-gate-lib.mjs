@@ -58,6 +58,8 @@ function collectOutgoingByUpdate({ updates, remoteName = "", gitExec }) {
   const orderedShas = [];
   const seen = new Set();
   const shaBranches = new Map();
+  const orderedEntries = [];
+  const seenEntries = new Set();
 
   const remoteRefs =
     stableValue(remoteName).length > 0
@@ -105,16 +107,20 @@ function collectOutgoingByUpdate({ updates, remoteName = "", gitExec }) {
         seen.add(sha);
         orderedShas.push(sha);
       }
-      if (!branchName) {
-        continue;
+      if (branchName) {
+        const branches = shaBranches.get(sha) ?? new Set();
+        branches.add(branchName);
+        shaBranches.set(sha, branches);
       }
-      const branches = shaBranches.get(sha) ?? new Set();
-      branches.add(branchName);
-      shaBranches.set(sha, branches);
+      const entryKey = `${branchName}\0${sha}`;
+      if (!seenEntries.has(entryKey)) {
+        seenEntries.add(entryKey);
+        orderedEntries.push({ sha, branchName });
+      }
     }
   }
 
-  return { orderedShas, shaBranches };
+  return { orderedShas, shaBranches, orderedEntries };
 }
 
 export function computeOutgoingShas({ updates, remoteName = "", gitExec }) {
@@ -271,7 +277,7 @@ async function loadDismissalsForBranch(repoRoot, branchName) {
 }
 
 export async function loadDismissedFindingSignatures({ repoRoot, shaBranches }) {
-  const dismissedBySha = new Map();
+  const dismissedByBranch = new Map();
   const branches = new Set();
   for (const values of shaBranches.values()) {
     for (const branchName of values) {
@@ -281,16 +287,10 @@ export async function loadDismissedFindingSignatures({ repoRoot, shaBranches }) 
 
   for (const branchName of branches) {
     const branchDismissals = await loadDismissalsForBranch(repoRoot, branchName);
-    for (const [sha, signatures] of branchDismissals.entries()) {
-      const next = dismissedBySha.get(sha) ?? new Set();
-      for (const signature of signatures) {
-        next.add(signature);
-      }
-      dismissedBySha.set(sha, next);
-    }
+    dismissedByBranch.set(branchName, branchDismissals);
   }
 
-  return dismissedBySha;
+  return dismissedByBranch;
 }
 
 async function runSynchronousReview({ repoRoot, sha, timeoutMs }) {
@@ -324,29 +324,31 @@ export async function executePushGate({
   gitExec = (args) => defaultGitExec(args, repoRoot),
 }) {
   const updates = parseRefUpdates(stdinText);
-  const { orderedShas, shaBranches } = collectOutgoingByUpdate({
+  const { orderedShas, shaBranches, orderedEntries } = collectOutgoingByUpdate({
     updates,
     remoteName,
     gitExec,
   });
-  const dismissedBySha = await loadDismissedFindingSignatures({ repoRoot, shaBranches });
+  const dismissedByBranch = await loadDismissedFindingSignatures({ repoRoot, shaBranches });
   const blocked = [];
   let actionable = 0;
   let syncReruns = 0;
   let runningWaited = 0;
 
-  for (const sha of orderedShas) {
+  for (const { sha, branchName } of orderedEntries) {
+    const dismissedSignatures = dismissedByBranch.get(branchName)?.get(sha) ?? new Set();
     let state = await readReviewGateState({
       reviewsDir,
       sha,
       minSeverity,
-      dismissedSignatures: dismissedBySha.get(sha) ?? new Set(),
+      dismissedSignatures,
     });
 
     const deadline = Date.now() + timeoutMs;
     while (state.status === "absent" && (await hasActiveReviewLockForSha(reviewsDir, sha))) {
       if (!shouldContinue() || Date.now() >= deadline) {
         blocked.push({
+          branch: branchName,
           sha,
           status: "missing",
           severity: "none",
@@ -361,11 +363,11 @@ export async function executePushGate({
         reviewsDir,
         sha,
         minSeverity,
-        dismissedSignatures: dismissedBySha.get(sha) ?? new Set(),
+        dismissedSignatures,
       });
     }
 
-    if (blocked.some((entry) => entry.sha === sha)) {
+    if (blocked.some((entry) => entry.sha === sha && entry.branch === branchName)) {
       continue;
     }
 
@@ -380,10 +382,11 @@ export async function executePushGate({
         reviewsDir,
         sha,
         minSeverity,
-        dismissedSignatures: dismissedBySha.get(sha) ?? new Set(),
+        dismissedSignatures,
       });
       if (state.status === "absent") {
         blocked.push({
+          branch: branchName,
           sha,
           status: "missing",
           severity: "none",
@@ -399,6 +402,7 @@ export async function executePushGate({
     }
     if (state.blocking) {
       blocked.push({
+        branch: branchName,
         sha,
         status: state.status,
         severity: state.worstSeverity,

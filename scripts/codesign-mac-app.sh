@@ -24,6 +24,21 @@ HELP
   exit 0
 fi
 
+bundle_read() {
+  /usr/libexec/PlistBuddy -c "Print $2" "$1/Contents/Info.plist" 2>/dev/null || true
+}
+
+BUNDLE_ID="$(bundle_read "$APP_BUNDLE" ":CFBundleIdentifier")"
+APP_EXECUTABLE="$(bundle_read "$APP_BUNDLE" ":CFBundleExecutable")"
+APP_MODE="${MAC_APP_PRODUCT:-}"
+if [[ -z "$APP_MODE" ]]; then
+  if [[ "$BUNDLE_ID" == *".easymode."* || "$APP_EXECUTABLE" == "OpenClawEasyModeMac" ]]; then
+    APP_MODE="easy-mode"
+  else
+    APP_MODE="openclaw"
+  fi
+fi
+
 if [ ! -d "$APP_BUNDLE" ]; then
   echo "App bundle not found: $APP_BUNDLE" >&2
   exit 1
@@ -135,6 +150,49 @@ if [[ "$IDENTITY" != "-" ]]; then
 fi
 timestamp_args=("$timestamp_arg")
 
+if [[ "$APP_MODE" == "easy-mode" ]]; then
+cat > "$ENT_TMP_BASE" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <key>com.apple.security.files.bookmarks.app-scope</key>
+    <true/>
+</dict>
+</plist>
+PLIST
+
+cat > "$ENT_TMP_APP_BASE" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <key>com.apple.security.files.bookmarks.app-scope</key>
+    <true/>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>
+PLIST
+else
 cat > "$ENT_TMP_BASE" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -166,6 +224,7 @@ cat > "$ENT_TMP_APP_BASE" <<'PLIST'
 </dict>
 </plist>
 PLIST
+fi
 
 cat > "$ENT_TMP_RUNTIME" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -247,9 +306,11 @@ verify_team_ids() {
   fi
 }
 
-# Sign main binary
-if [ -f "$APP_BUNDLE/Contents/MacOS/OpenClaw" ]; then
-  echo "Signing main binary"; sign_item "$APP_BUNDLE/Contents/MacOS/OpenClaw" "$APP_ENTITLEMENTS"
+if [ -d "$APP_BUNDLE/Contents/MacOS" ]; then
+  find "$APP_BUNDLE/Contents/MacOS" -type f -print0 | while IFS= read -r -d '' f; do
+    echo "Signing main binary: $f"
+    sign_item "$f" "$APP_ENTITLEMENTS"
+  done
 fi
 
 # Sign Sparkle deeply if present
@@ -277,6 +338,15 @@ fi
 if [ -d "$APP_BUNDLE/Contents/Frameworks" ]; then
   find "$APP_BUNDLE/Contents/Frameworks" \( -name "*.framework" -o -name "*.dylib" \) ! -path "*Sparkle.framework*" -print0 | while IFS= read -r -d '' f; do
     echo "Signing framework: $f"; sign_plain_item "$f"
+  done
+fi
+
+if [ -d "$APP_BUNDLE/Contents/Resources" ]; then
+  find "$APP_BUNDLE/Contents/Resources" -type f -print0 | while IFS= read -r -d '' f; do
+    if /usr/bin/file "$f" | /usr/bin/grep -q "Mach-O"; then
+      echo "Signing embedded runtime: $f"
+      sign_plain_item "$f"
+    fi
   done
 fi
 

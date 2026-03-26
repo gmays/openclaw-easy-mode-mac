@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>OpenClawEasyModeMac</string>
+    <key>CFBundleIdentifier</key>
+    <string>ai.openclaw.easymode.mac</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>OpenClaw Easy Mode (Mac)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>2026.3.24</string>
+    <key>CFBundleVersion</key>
+    <string>2026032490</string>
+    <key>CFBundleIconFile</key>
+    <string>OpenClaw</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
+        <true/>
+    </dict>
+    <key>NSUserNotificationUsageDescription</key>
+    <string>OpenClaw Easy Mode uses notifications for chat and service updates.</string>
+</dict>
+</plist>
