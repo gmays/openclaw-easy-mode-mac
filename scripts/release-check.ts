@@ -36,7 +36,7 @@ const forbiddenPrefixes = ["dist-runtime/", "dist/OpenClaw.app/"];
 const npmPackUnpackedSizeBudgetBytes = 190 * 1024 * 1024;
 const appcastConfigs = [
   { path: resolve("appcast.xml"), allowEmpty: false, required: true },
-  { path: resolve("appcast-easy-mode.xml"), allowEmpty: true, required: false },
+  { path: resolve("appcast-easy-mode.xml"), allowEmpty: false, required: true },
 ] as const;
 const laneBuildMin = 1_000_000_000;
 const laneFloorAdoptionDateKey = 20260227;

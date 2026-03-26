@@ -80,7 +80,7 @@ final class EasyModeRuntimeManager {
             self.authToken = token
             self.captureGatewayOutput(process: process)
             await EasyModeGatewayConnection.shared.setEndpoint(url: endpointURL, token: token)
-            guard self.isCurrentLaunch(launchGeneration, process: process) else {
+            guard self.isLaunchGenerationCurrent(launchGeneration) else {
                 process.terminate()
                 return
             }
@@ -88,7 +88,7 @@ final class EasyModeRuntimeManager {
                 isProcessRunning: { process.isRunning },
                 shouldContinue: {
                     await MainActor.run {
-                        self.isCurrentLaunch(launchGeneration, process: process)
+                        self.isLaunchGenerationCurrent(launchGeneration)
                     }
                 },
                 healthCheck: {
@@ -98,7 +98,7 @@ final class EasyModeRuntimeManager {
                         timeoutMs: 1_500)
                 }
             ) else {
-                guard self.isCurrentLaunch(launchGeneration, process: process) else {
+                guard self.isLaunchGenerationCurrent(launchGeneration) else {
                     process.terminate()
                     return
                 }
@@ -144,13 +144,15 @@ final class EasyModeRuntimeManager {
         self.telegramToken = EasyModeConfigFile.telegramBotToken()
     }
 
-    func saveTelegramToken(_ token: String) {
+    func saveTelegramToken(_ token: String) -> Bool {
         do {
             try EasyModeConfigFile.setTelegramBotToken(token)
             self.telegramToken = EasyModeConfigFile.telegramBotToken()
             self.lastError = nil
+            return true
         } catch {
             self.lastError = error.localizedDescription
+            return false
         }
     }
 
@@ -244,8 +246,12 @@ final class EasyModeRuntimeManager {
         return self.launchGeneration
     }
 
+    private func isLaunchGenerationCurrent(_ launchGeneration: Int) -> Bool {
+        self.launchGeneration == launchGeneration
+    }
+
     private func isCurrentLaunch(_ launchGeneration: Int, process: Process? = nil) -> Bool {
-        guard self.launchGeneration == launchGeneration else {
+        guard self.isLaunchGenerationCurrent(launchGeneration) else {
             return false
         }
         guard let process else {
@@ -272,13 +278,15 @@ final class EasyModeRuntimeManager {
                 self.currentPort = nil
                 self.authToken = nil
                 await EasyModeGatewayConnection.shared.clear()
-                if case .running = self.status {
-                    if process.terminationStatus == 0 {
-                        self.status = .stopped
-                    } else {
-                        self.status = .failed("Gateway exited with status \(process.terminationStatus).")
-                    }
+                if case .stopped = self.status {
+                    return
                 }
+                if process.terminationStatus == 0 {
+                    self.status = .stopped
+                    return
+                }
+                self.status = .failed("Gateway exited with status \(process.terminationStatus).")
+                self.lastError = "Gateway exited with status \(process.terminationStatus)."
             }
         }
         return process

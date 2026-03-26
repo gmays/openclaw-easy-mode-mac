@@ -49,7 +49,7 @@ canonical_sparkle_build() {
 }
 
 is_beta_version() {
-  [[ "$1" == *"-beta."* ]]
+  [[ "$1" =~ (^|[.-])beta\.[0-9]+([.-]|$) ]]
 }
 
 # Local fallback releases must not silently fall back to a git-rev-count build number.

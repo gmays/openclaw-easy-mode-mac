@@ -168,8 +168,9 @@ struct EasyModeRootView: View {
                             .textFieldStyle(.roundedBorder)
                         HStack(spacing: 12) {
                             Button("Save Bot Token") {
-                                self.runtimeManager.saveTelegramToken(self.telegramDraft)
-                                self.telegramDraft = self.runtimeManager.telegramToken
+                                if self.runtimeManager.saveTelegramToken(self.telegramDraft) {
+                                    self.telegramDraft = self.runtimeManager.telegramToken
+                                }
                             }
                             .buttonStyle(.borderedProminent)
                             Button("Logout") {
