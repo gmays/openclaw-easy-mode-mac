@@ -36,9 +36,9 @@ const forbiddenPrefixes = ["dist-runtime/", "dist/OpenClaw.app/"];
 const npmPackUnpackedSizeBudgetBytes = 190 * 1024 * 1024;
 const appcastConfigs = [
   { path: resolve("appcast.xml"), allowEmpty: false, required: true },
-  // Easy Mode packages embed this feed URL already, but the checked-in feed can
-  // still be empty between releases. Keep push CI aligned with that repo state.
-  { path: resolve("appcast-easy-mode.xml"), allowEmpty: true, required: false },
+  // Easy Mode packages ship this feed URL, so the file itself must exist on
+  // main, even though the checked-in feed can be empty between stable releases.
+  { path: resolve("appcast-easy-mode.xml"), allowEmpty: true, required: true },
 ] as const;
 const laneBuildMin = 1_000_000_000;
 const laneFloorAdoptionDateKey = 20260227;
@@ -224,27 +224,49 @@ export function collectAppcastSparkleVersionErrors(
   return errors;
 }
 
-function checkAppcastSparkleVersions() {
-  for (const config of appcastConfigs) {
-    if (!existsSync(config.path)) {
-      if (config.required) {
-        console.error(`release-check: missing required appcast file ${config.path}`);
-        process.exit(1);
+export function collectAppcastFileErrors(
+  appcasts: Array<{
+    path: string;
+    xml?: string;
+    allowEmpty?: boolean;
+    required?: boolean;
+  }>,
+): string[] {
+  const errors: string[] = [];
+
+  for (const appcast of appcasts) {
+    if (appcast.xml === undefined) {
+      if (appcast.required) {
+        errors.push(`missing required appcast file ${appcast.path}`);
       }
       continue;
     }
 
-    const xml = readFileSync(config.path, "utf8");
-    const errors = collectAppcastSparkleVersionErrors(xml, { allowEmpty: config.allowEmpty });
-    if (errors.length > 0) {
-      console.error(
-        `release-check: ${config.path.split("/").pop() ?? config.path} sparkle version validation failed:`,
-      );
-      for (const error of errors) {
-        console.error(`  - ${error}`);
-      }
-      process.exit(1);
+    const xmlErrors = collectAppcastSparkleVersionErrors(appcast.xml, {
+      allowEmpty: appcast.allowEmpty,
+    });
+    for (const error of xmlErrors) {
+      errors.push(`${appcast.path.split("/").pop() ?? appcast.path}: ${error}`);
     }
+  }
+
+  return errors;
+}
+
+function checkAppcastSparkleVersions() {
+  const errors = collectAppcastFileErrors(
+    appcastConfigs.map((config) => ({
+      ...config,
+      xml: existsSync(config.path) ? readFileSync(config.path, "utf8") : undefined,
+    })),
+  );
+
+  if (errors.length > 0) {
+    console.error("release-check: appcast validation failed:");
+    for (const error of errors) {
+      console.error(`  - ${error}`);
+    }
+    process.exit(1);
   }
 }
 

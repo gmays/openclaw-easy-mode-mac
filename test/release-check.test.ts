@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { listBundledPluginPackArtifacts } from "../scripts/lib/bundled-plugin-build-entries.mjs";
 import { listPluginSdkDistArtifacts } from "../scripts/lib/plugin-sdk-entries.mjs";
 import {
+  collectAppcastFileErrors,
   collectAppcastSparkleVersionErrors,
   collectBundledExtensionManifestErrors,
   collectForbiddenPackPaths,
@@ -53,6 +54,33 @@ describe("collectAppcastSparkleVersionErrors", () => {
     const xml = `<rss><channel>${makeItem("2026.3.1", "2026030190")}</channel></rss>`;
 
     expect(collectAppcastSparkleVersionErrors(xml)).toEqual([]);
+  });
+});
+
+describe("collectAppcastFileErrors", () => {
+  it("requires the Easy Mode appcast file even when an empty feed is allowed", () => {
+    expect(
+      collectAppcastFileErrors([
+        {
+          path: "/repo/appcast-easy-mode.xml",
+          allowEmpty: true,
+          required: true,
+        },
+      ]),
+    ).toEqual(["missing required appcast file /repo/appcast-easy-mode.xml"]);
+  });
+
+  it("accepts an empty Easy Mode feed once the required file exists", () => {
+    expect(
+      collectAppcastFileErrors([
+        {
+          path: "/repo/appcast-easy-mode.xml",
+          xml: "<rss><channel></channel></rss>",
+          allowEmpty: true,
+          required: true,
+        },
+      ]),
+    ).toEqual([]);
   });
 });
 
