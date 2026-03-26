@@ -1,6 +1,6 @@
 import Foundation
 
-enum EasyModeJSONValue: Codable {
+enum EasyModeJSONValue: Codable, Equatable {
     case string(String)
     case number(Double)
     case bool(Bool)

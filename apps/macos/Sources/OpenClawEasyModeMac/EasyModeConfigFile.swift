@@ -27,24 +27,8 @@ enum EasyModeConfigFile {
         let whatsapp: [String: EasyModeJSONValue]?
     }
 
-    static func loadRoot() -> [String: Any] {
-        let url = EasyModeProduct.configURL
-        guard let data = try? Data(contentsOf: url),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            return [:]
-        }
-        return root
-    }
-
-    static func saveRoot(_ root: [String: Any]) throws {
-        try EasyModeProduct.ensureDirectories()
-        let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
-        try data.write(to: EasyModeProduct.configURL, options: [.atomic])
-    }
-
-    static func ensureSeedConfig() throws {
-        var root = self.loadRoot()
+    static func seededRoot(from existingRoot: [String: Any]) -> (root: [String: Any], didChange: Bool) {
+        var root = existingRoot
         if root.isEmpty {
             root["meta"] = [
                 "productMode": EasyModeProduct.productMode,
@@ -58,8 +42,7 @@ enum EasyModeConfigFile {
                     "workspace": EasyModeProduct.workspaceURL.path,
                 ],
             ]
-            try self.saveRoot(root)
-            return
+            return (root, true)
         }
 
         var didChange = false
@@ -84,6 +67,66 @@ enum EasyModeConfigFile {
             root["agents"] = nextAgents
             didChange = true
         }
+
+        return (root, didChange)
+    }
+
+    static func makeExportBundle(
+        root: [String: Any],
+        allowedRoots: [String],
+        exportedAt: Date = Date(),
+    ) -> ExportBundle {
+        let channels = root["channels"] as? [String: Any] ?? [:]
+        let settings = (EasyModeJSONValue.fromFoundation(root).flatMap {
+            if case let .object(value) = $0 {
+                return value
+            }
+            return nil
+        }) ?? [:]
+        let telegram = channels["telegram"].flatMap(EasyModeJSONValue.fromFoundation).flatMap { value in
+            if case let .object(object) = value {
+                return object
+            }
+            return nil
+        }
+        let whatsapp = channels["whatsapp"].flatMap(EasyModeJSONValue.fromFoundation).flatMap { value in
+            if case let .object(object) = value {
+                return object
+            }
+            return nil
+        }
+        return ExportBundle(
+            version: 1,
+            productMode: EasyModeProduct.productMode,
+            exportedAt: ISO8601DateFormatter().string(from: exportedAt),
+            workspaceDir: EasyModeProduct.workspaceURL.path,
+            settings: settings,
+            allowedRootsManifest: AllowedRootsManifestPayload(
+                workspaceDir: EasyModeProduct.workspaceURL.path,
+                allowedRoots: allowedRoots),
+            connectors: ConnectorPayload(telegram: telegram, whatsapp: whatsapp))
+    }
+
+    static func loadRoot() -> [String: Any] {
+        let url = EasyModeProduct.configURL
+        guard let data = try? Data(contentsOf: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return [:]
+        }
+        return root
+    }
+
+    static func saveRoot(_ root: [String: Any]) throws {
+        try EasyModeProduct.ensureDirectories()
+        let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: EasyModeProduct.configURL, options: [.atomic])
+    }
+
+    static func ensureSeedConfig() throws {
+        let seeded = self.seededRoot(from: self.loadRoot())
+        let root = seeded.root
+        let didChange = seeded.didChange
         if didChange {
             try self.saveRoot(root)
         }
@@ -120,36 +163,7 @@ enum EasyModeConfigFile {
     }
 
     static func exportBundle(allowedRoots: [String]) -> ExportBundle {
-        let root = self.loadRoot()
-        let channels = root["channels"] as? [String: Any] ?? [:]
-        let settings = (EasyModeJSONValue.fromFoundation(root).flatMap {
-            if case let .object(value) = $0 {
-                return value
-            }
-            return nil
-        }) ?? [:]
-        let telegram = channels["telegram"].flatMap(EasyModeJSONValue.fromFoundation).flatMap { value in
-            if case let .object(object) = value {
-                return object
-            }
-            return nil
-        }
-        let whatsapp = channels["whatsapp"].flatMap(EasyModeJSONValue.fromFoundation).flatMap { value in
-            if case let .object(object) = value {
-                return object
-            }
-            return nil
-        }
-        return ExportBundle(
-            version: 1,
-            productMode: EasyModeProduct.productMode,
-            exportedAt: ISO8601DateFormatter().string(from: Date()),
-            workspaceDir: EasyModeProduct.workspaceURL.path,
-            settings: settings,
-            allowedRootsManifest: AllowedRootsManifestPayload(
-                workspaceDir: EasyModeProduct.workspaceURL.path,
-                allowedRoots: allowedRoots),
-            connectors: ConnectorPayload(telegram: telegram, whatsapp: whatsapp))
+        self.makeExportBundle(root: self.loadRoot(), allowedRoots: allowedRoots)
     }
 
     static func writeExportBundle(_ bundle: ExportBundle, to url: URL) throws {

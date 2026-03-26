@@ -1051,6 +1051,21 @@ jobs:
           done
           exit 1
 
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+
+      - name: Package Easy Mode smoke
+        env:
+          ALLOW_ADHOC_SIGNING: "1"
+          CODESIGN_TIMESTAMP: "off"
+          DISABLE_LIBRARY_VALIDATION: "1"
+          MAC_APP_PRODUCT: "easy-mode"
+          BUILD_CONFIG: "release"
+          SKIP_PNPM_INSTALL: "1"
+        run: ./scripts/package-mac-app.sh
+
   android:
     needs: [scope]
     if: needs.scope.outputs.docs_only != 'true' && needs.scope.outputs.run_android == 'true'

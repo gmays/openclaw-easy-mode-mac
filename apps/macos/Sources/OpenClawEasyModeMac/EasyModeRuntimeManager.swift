@@ -7,6 +7,12 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class EasyModeRuntimeManager {
+    struct RuntimeCommand: Equatable {
+        let executable: URL
+        let arguments: [String]
+        let environment: [String: String]
+    }
+
     enum Status: Equatable {
         case stopped
         case starting
@@ -70,6 +76,15 @@ final class EasyModeRuntimeManager {
                 url: URL(string: "ws://127.0.0.1:\(port)")!,
                 token: token)
             self.captureGatewayOutput(process: process)
+            guard await Self.waitForGatewayReady(isProcessRunning: { process.isRunning }, healthCheck: {
+                try await EasyModeGatewayConnection.shared.healthOK(timeoutMs: 1_500)
+            }) else {
+                process.terminate()
+                throw NSError(
+                    domain: "EasyModeRuntime",
+                    code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "Gateway did not become ready in time."])
+            }
             self.status = .running(port: port)
             self.lastError = nil
         } catch {
@@ -263,7 +278,7 @@ final class EasyModeRuntimeManager {
         arguments: [String],
         environment: [String: String]
     ) {
-        try self.runtimeCommand(arguments: [
+        let command = try self.runtimeCommand(arguments: [
             "gateway",
             "run",
             "--port",
@@ -276,19 +291,31 @@ final class EasyModeRuntimeManager {
             token,
             "--allow-unconfigured",
         ])
+        return (command.executable, command.arguments, command.environment)
     }
 
-    private func runtimeCommand(arguments: [String]) throws -> (
-        executable: URL,
+    func runtimeCommand(arguments: [String]) throws -> RuntimeCommand {
+        try Self.runtimeCommand(
+            arguments: arguments,
+            processEnvironment: ProcessInfo.processInfo.environment,
+            resourceURL: Bundle.main.resourceURL,
+            currentDirectoryURL: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true))
+    }
+
+    static func runtimeCommand(
         arguments: [String],
-        environment: [String: String]
-    ) {
+        processEnvironment: [String: String],
+        resourceURL: URL?,
+        currentDirectoryURL: URL,
+    ) throws -> RuntimeCommand {
+        let entrypoint = try self.resolveRuntimeEntrypoint(
+            resourceURL: resourceURL,
+            currentDirectoryURL: currentDirectoryURL)
+        let env = self.runtimeEnvironment(processEnvironment: processEnvironment)
         let executable: URL
         var commandArguments: [String]
-        let entrypoint = try self.resolveRuntimeEntrypoint()
-        let env = self.runtimeEnvironment()
 
-        if let bundledNode = self.resolveBundledNode() {
+        if let bundledNode = self.resolveBundledNode(resourceURL: resourceURL) {
             executable = bundledNode
             commandArguments = [entrypoint.path]
         } else {
@@ -297,11 +324,11 @@ final class EasyModeRuntimeManager {
         }
 
         commandArguments.append(contentsOf: arguments)
-        return (executable, commandArguments, env)
+        return RuntimeCommand(executable: executable, arguments: commandArguments, environment: env)
     }
 
-    private func runtimeEnvironment() -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
+    static func runtimeEnvironment(processEnvironment: [String: String]) -> [String: String] {
+        var env = processEnvironment
         env["OPENCLAW_PRODUCT_MODE"] = EasyModeProduct.productMode
         env["OPENCLAW_STATE_DIR"] = EasyModeProduct.stateDirURL.path
         env["OPENCLAW_CONFIG_PATH"] = EasyModeProduct.configURL.path
@@ -309,8 +336,8 @@ final class EasyModeRuntimeManager {
         return env
     }
 
-    private func resolveBundledNode() -> URL? {
-        let candidate = Bundle.main.resourceURL?
+    static func resolveBundledNode(resourceURL: URL?) -> URL? {
+        let candidate = resourceURL?
             .appendingPathComponent("runtime", isDirectory: true)
             .appendingPathComponent("node", isDirectory: false)
         guard let candidate else {
@@ -319,16 +346,18 @@ final class EasyModeRuntimeManager {
         return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
     }
 
-    private func resolveRuntimeEntrypoint() throws -> URL {
-        if let resourceURL = Bundle.main.resourceURL {
+    static func resolveRuntimeEntrypoint(
+        resourceURL: URL?,
+        currentDirectoryURL: URL,
+    ) throws -> URL {
+        if let resourceURL {
             let bundledRoot = resourceURL.appendingPathComponent("openclaw-runtime", isDirectory: true)
             if let entry = Self.resolveRuntimeEntrypoint(in: bundledRoot) {
                 return entry
             }
         }
 
-        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        for candidate in Self.searchRoots(startingAt: cwd) {
+        for candidate in Self.searchRoots(startingAt: currentDirectoryURL) {
             if let entry = Self.resolveRuntimeEntrypoint(in: candidate) {
                 return entry
             }
@@ -365,6 +394,28 @@ final class EasyModeRuntimeManager {
             current = parent
         }
         return results
+    }
+
+    static func waitForGatewayReady(
+        timeout: TimeInterval = 6,
+        sleepNanoseconds: UInt64 = 300_000_000,
+        isProcessRunning: @escaping () -> Bool,
+        healthCheck: @escaping () async throws -> Bool,
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !isProcessRunning() {
+                return false
+            }
+            do {
+                if try await healthCheck() {
+                    return true
+                }
+            } catch {
+            }
+            try? await Task.sleep(nanoseconds: sleepNanoseconds)
+        }
+        return false
     }
 
     private static func reserveLoopbackPort() throws -> Int {

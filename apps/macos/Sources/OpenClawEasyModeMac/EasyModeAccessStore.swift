@@ -5,6 +5,37 @@ import Observation
 @MainActor
 @Observable
 final class EasyModeAccessStore {
+    struct BookmarkResolution {
+        let url: URL
+        let isStale: Bool
+    }
+
+    struct Bookmarking {
+        var startAccessing: (URL) -> Bool
+        var stopAccessing: (URL) -> Void
+        var makeBookmark: (URL) throws -> Data
+        var resolveBookmark: (Data) throws -> BookmarkResolution
+
+        static let live = Bookmarking(
+            startAccessing: { $0.startAccessingSecurityScopedResource() },
+            stopAccessing: { $0.stopAccessingSecurityScopedResource() },
+            makeBookmark: { url in
+                try url.bookmarkData(
+                    options: [.withSecurityScope],
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil)
+            },
+            resolveBookmark: { data in
+                var stale = false
+                let url = try URL(
+                    resolvingBookmarkData: data,
+                    options: [.withSecurityScope],
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &stale)
+                return BookmarkResolution(url: url, isStale: stale)
+            })
+    }
+
     struct Grant: Codable, Identifiable, Hashable {
         let id: UUID
         let path: String
@@ -21,8 +52,10 @@ final class EasyModeAccessStore {
     private(set) var grants: [Grant] = []
     private(set) var lastError: String?
     private var activeUrls: [UUID: URL] = [:]
+    private let bookmarking: Bookmarking
 
-    init() {
+    init(bookmarking: Bookmarking = .live) {
+        self.bookmarking = bookmarking
         self.load()
         self.startAccessingResolvedGrants()
         try? self.writeRuntimeManifest()
@@ -48,7 +81,7 @@ final class EasyModeAccessStore {
 
     func removeGrant(_ grant: Grant) {
         if let url = self.activeUrls.removeValue(forKey: grant.id) {
-            url.stopAccessingSecurityScopedResource()
+            self.bookmarking.stopAccessing(url)
         }
         self.grants.removeAll { $0.id == grant.id }
         self.persist()
@@ -70,8 +103,8 @@ final class EasyModeAccessStore {
         try self.writeRuntimeManifest()
     }
 
-    private func addGrant(url: URL) throws {
-        let accessStarted = url.startAccessingSecurityScopedResource()
+    func addGrant(url: URL) throws {
+        let accessStarted = self.bookmarking.startAccessing(url)
         guard accessStarted else {
             throw NSError(
                 domain: "EasyModeAccessStore",
@@ -81,22 +114,19 @@ final class EasyModeAccessStore {
         var shouldStopNewAccess = true
         defer {
             if shouldStopNewAccess {
-                url.stopAccessingSecurityScopedResource()
+                self.bookmarking.stopAccessing(url)
             }
         }
 
         let existingGrants = self.grants.filter { $0.path == url.path }
-        let bookmark = try url.bookmarkData(
-            options: [.withSecurityScope],
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil)
+        let bookmark = try self.bookmarking.makeBookmark(url)
         let grant = Grant(
             id: UUID(),
             path: url.path,
             bookmarkDataBase64: bookmark.base64EncodedString())
         for existing in existingGrants {
-            if let activeUrl = self.activeUrls.removeValue(forKey: existing.id), activeUrl != url {
-                activeUrl.stopAccessingSecurityScopedResource()
+            if let activeUrl = self.activeUrls.removeValue(forKey: existing.id) {
+                self.bookmarking.stopAccessing(activeUrl)
             }
         }
         self.grants.removeAll { $0.path == url.path }
@@ -137,25 +167,18 @@ final class EasyModeAccessStore {
             guard let data = Data(base64Encoded: grant.bookmarkDataBase64) else {
                 continue
             }
-            var stale = false
             var resolvedUrl: URL?
             do {
-                let url = try URL(
-                    resolvingBookmarkData: data,
-                    options: [.withSecurityScope],
-                    relativeTo: nil,
-                    bookmarkDataIsStale: &stale)
+                let resolvedBookmark = try self.bookmarking.resolveBookmark(data)
+                let url = resolvedBookmark.url
                 resolvedUrl = url
-                guard url.startAccessingSecurityScopedResource() else {
+                guard self.bookmarking.startAccessing(url) else {
                     self.lastError = "Failed to restore access for \(grant.path)."
                     continue
                 }
                 let bookmarkDataBase64: String
-                if stale {
-                    bookmarkDataBase64 = try url.bookmarkData(
-                        options: [.withSecurityScope],
-                        includingResourceValuesForKeys: nil,
-                        relativeTo: nil).base64EncodedString()
+                if resolvedBookmark.isStale {
+                    bookmarkDataBase64 = try self.bookmarking.makeBookmark(url).base64EncodedString()
                 } else {
                     bookmarkDataBase64 = grant.bookmarkDataBase64
                 }
@@ -166,7 +189,9 @@ final class EasyModeAccessStore {
                         path: url.path,
                         bookmarkDataBase64: bookmarkDataBase64))
             } catch {
-                resolvedUrl?.stopAccessingSecurityScopedResource()
+                if let resolvedUrl {
+                    self.bookmarking.stopAccessing(resolvedUrl)
+                }
                 self.lastError = error.localizedDescription
             }
         }
