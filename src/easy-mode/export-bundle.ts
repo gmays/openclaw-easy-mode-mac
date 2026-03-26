@@ -16,31 +16,36 @@ export type EasyModeExportBundle = {
   };
 };
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 export function isEasyModeExportBundle(value: unknown): value is EasyModeExportBundle {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!isPlainRecord(value)) {
     return false;
   }
-  const record = value as Record<string, unknown>;
+  const record = value;
   if (record.version !== 1 || record.productMode !== EASY_MODE_PRODUCT_MODE) {
     return false;
   }
   if (typeof record.exportedAt !== "string" || typeof record.workspaceDir !== "string") {
     return false;
   }
-  if (!record.settings || typeof record.settings !== "object" || Array.isArray(record.settings)) {
+  if (!isPlainRecord(record.settings)) {
     return false;
   }
   const allowedRootsManifest = record.allowedRootsManifest;
-  if (
-    !allowedRootsManifest ||
-    typeof allowedRootsManifest !== "object" ||
-    Array.isArray(allowedRootsManifest)
-  ) {
+  if (!isPlainRecord(allowedRootsManifest)) {
     return false;
   }
-  const allowedRootsRecord = allowedRootsManifest as Record<string, unknown>;
+  const allowedRootsRecord = allowedRootsManifest;
+  const connectors = record.connectors;
   return (
     typeof allowedRootsRecord.workspaceDir === "string" &&
-    Array.isArray(allowedRootsRecord.allowedRoots)
+    Array.isArray(allowedRootsRecord.allowedRoots) &&
+    allowedRootsRecord.allowedRoots.every((root) => typeof root === "string") &&
+    isPlainRecord(connectors) &&
+    (connectors.telegram === undefined || isPlainRecord(connectors.telegram)) &&
+    (connectors.whatsapp === undefined || isPlainRecord(connectors.whatsapp))
   );
 }
