@@ -1,0 +1,42 @@
+#!/bin/sh
+
+if [ -d "/opt/homebrew/bin" ]; then
+  PATH="/opt/homebrew/bin:$PATH"
+fi
+if [ -d "/usr/local/bin" ]; then
+  PATH="/usr/local/bin:$PATH"
+fi
+if [ -d "$HOME/.volta/bin" ]; then
+  PATH="$HOME/.volta/bin:$PATH"
+fi
+if [ -d "$HOME/.asdf/shims" ]; then
+  PATH="$HOME/.asdf/shims:$PATH"
+fi
+
+if [ "${CODEX_REVIEW_ENABLED:-1}" = "0" ]; then
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+COMMIT_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+if [ -z "$COMMIT_SHA" ]; then
+  exit 0
+fi
+
+REVIEWS_DIR="${CODEX_REVIEW_DIR:-$REPO_ROOT/.code-reviews}"
+case "$REVIEWS_DIR" in
+  /*) ;;
+  *) REVIEWS_DIR="$REPO_ROOT/$REVIEWS_DIR" ;;
+esac
+
+LOG_DIR="$REVIEWS_DIR/logs"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+LOG_FILE="$LOG_DIR/post-commit.log"
+
+(
+  cd "$REPO_ROOT" || exit 0
+  scripts/codex-review-commit --sha "$COMMIT_SHA" --trigger post-commit >> "$LOG_FILE" 2>&1 || true
+  scripts/codex-review-inbox --mode catch-up --sha "$COMMIT_SHA" >> "$LOG_FILE" 2>&1 || true
+) &
+
+exit 0

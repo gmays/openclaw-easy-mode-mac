@@ -164,3 +164,61 @@ Typical sync flow:
 ```bash
 git fetch upstream
 git merge upstream/main
+```
+
+If this repo intentionally diverges in some areas, upstream changes may be merged selectively.
+
+## Contributing
+
+This is an open source side project and contributions are welcome.
+
+Good contributions will likely include:
+
+- macOS app work
+- policy and capability restriction work
+- safer file access patterns
+- browser isolation improvements
+- onboarding simplification
+- export/import and migration flows
+- docs and testing
+
+Please keep the spirit of the project in mind:
+
+> simpler, narrower, safer, more understandable
+
+Not every upstream OpenClaw feature belongs in Easy Mode.
+
+## Current state of the repo
+
+Right now, this repository still contains substantial upstream OpenClaw history and structure because it began as a direct derivative of that codebase. That is expected.
+
+## Credits
+
+Huge credit to the OpenClaw project and its contributors for building the foundation this project stands on.
+
+I will continue contributing improvements to the main OpenClaw repo. Ideally, the main OpenClaw project could eventually incorporate some of these experimental improvements to improve UX and we can EOL this project as no longer needed.
+
+- Upstream repo: [openclaw/openclaw](https://github.com/openclaw/openclaw)
+
+## Local Codex commit review
+
+This repo includes a local Git hook workflow for Codex-based commit review.
+
+- `git-hooks/post-commit` reviews `HEAD` after each commit
+- `git-hooks/pre-push` blocks push when outgoing commits still have unresolved actionable findings
+- review artifacts live under `.code-reviews/`
+- clearing or deleting a generated `.code-reviews/<sha>.md` file marks that report resolved
+
+Manual commands:
+
+- `scripts/codex-review-last-commit`
+- `scripts/codex-review-inbox --mode list`
+- `scripts/codex-review-dismiss-finding --sha <sha> --index <n>`
+
+Useful environment controls:
+
+- `CODEX_REVIEW_ENABLED=0`
+- `CODEX_REVIEW_OPEN_ON_FINDINGS=0`
+- `CODEX_REVIEW_PUSH_GATE_ENABLED=0`
+- `CODEX_REVIEW_PUSH_GATE_MIN_SEVERITY=major`
+- `CODEX_REVIEW_PUSH_GATE_BYPASS=1`

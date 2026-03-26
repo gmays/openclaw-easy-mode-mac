@@ -1,0 +1,142 @@
+#!/usr/bin/env node
+
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+  ackPathForLane,
+  collectReports,
+  resolveRepoRoot,
+  resolveReviewsDir,
+  runCatchup,
+} from "./codex-review-inbox-lib.mjs";
+import { computeOutgoingShas, defaultGitExec, parseRefUpdates } from "./codex-review-push-gate-lib.mjs";
+
+function stableValue(value) {
+  return String(value ?? "").trim();
+}
+
+function parseInteger(value, fallback) {
+  const parsed = Number.parseInt(stableValue(value), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseArgs(argv) {
+  const args = {
+    mode: "catch-up",
+    maxOpens: parseInteger(process.env.CODEX_REVIEW_INBOX_MAX_OPENS ?? "1", 1),
+    reviewsDir: stableValue(process.env.CODEX_REVIEW_DIR),
+    shaFilters: [],
+    stdinFile: "",
+    remoteName: "",
+  };
+
+  for (let index = 2; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const next = argv[index + 1];
+    switch (arg) {
+      case "--mode":
+        args.mode = stableValue(next);
+        index += 1;
+        break;
+      case "--max-opens":
+        args.maxOpens = parseInteger(next, args.maxOpens);
+        index += 1;
+        break;
+      case "--sha":
+        args.shaFilters.push(stableValue(next).toLowerCase());
+        index += 1;
+        break;
+      case "--stdin-file":
+        args.stdinFile = stableValue(next);
+        index += 1;
+        break;
+      case "--remote-name":
+        args.remoteName = stableValue(next);
+        index += 1;
+        break;
+      case "--reviews-dir":
+        args.reviewsDir = stableValue(next);
+        index += 1;
+        break;
+      case "-h":
+      case "--help":
+        console.log("Usage: scripts/codex-review-inbox [--mode catch-up|list] [--sha <sha>]");
+        process.exit(0);
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  return args;
+}
+
+async function resolveShaFilter(args, repoRoot) {
+  const selected = new Set(args.shaFilters.filter(Boolean));
+  if (!args.stdinFile) {
+    return selected;
+  }
+  const stdinText = await readFile(args.stdinFile, "utf8");
+  const updates = parseRefUpdates(stdinText);
+  const outgoing = computeOutgoingShas({
+    updates,
+    remoteName: args.remoteName,
+    gitExec: (gitArgs) => defaultGitExec(gitArgs, repoRoot),
+  });
+  for (const sha of outgoing) {
+    selected.add(sha.toLowerCase());
+  }
+  return selected;
+}
+
+async function main() {
+  if ((process.env.CODEX_REVIEW_ENABLED ?? "1").trim() === "0") {
+    return;
+  }
+
+  const args = parseArgs(process.argv);
+  if (
+    args.mode === "catch-up" &&
+    (process.env.CODEX_REVIEW_OPEN_ON_FINDINGS ?? "1").trim() === "0"
+  ) {
+    console.log("[codex-review-inbox] catch-up disabled (CODEX_REVIEW_OPEN_ON_FINDINGS=0)");
+    return;
+  }
+
+  const repoRoot = resolveRepoRoot(process.cwd());
+  const reviewsDir = await resolveReviewsDir(repoRoot, args.reviewsDir);
+  const shaFilter = await resolveShaFilter(args, repoRoot);
+
+  if (args.mode === "list") {
+    const reports = await collectReports({ reviewsDir });
+    const filtered = shaFilter.size > 0 ? reports.filter((report) => shaFilter.has(report.sha)) : reports;
+    const actionable = filtered.filter((report) => report.actionable);
+    console.log(`[codex-review-inbox] actionable=${actionable.length} total=${filtered.length}`);
+    for (const report of actionable) {
+      console.log(
+        `- sha=${report.sha} status=${stableValue(report.parsed?.review_status)} findings=${
+          Array.isArray(report.parsed?.findings) ? report.parsed.findings.length : 0
+        }`,
+      );
+    }
+    return;
+  }
+
+  const result = await runCatchup({
+    reviewsDir,
+    ackPath: ackPathForLane(reviewsDir),
+    maxOpens: Math.max(0, args.maxOpens),
+    shaFilter,
+  });
+  console.log(
+    `[codex-review-inbox] actionable=${result.actionable.length} pending=${result.pending.length} opened=${result.opened}`,
+  );
+}
+
+if (import.meta.url === pathToFileURL(path.resolve(process.argv[1] ?? "")).href) {
+  main().catch((error) => {
+    console.error(`[codex-review-inbox] ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}

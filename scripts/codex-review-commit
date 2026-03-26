@@ -1,0 +1,314 @@
+#!/usr/bin/env node
+
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import {
+  normalizeModelOutput,
+  writeReviewArtifacts,
+} from "./lib/codex-review-findings.mjs";
+import { resolveRepoRoot, resolveReviewsDir } from "./codex-review-inbox-lib.mjs";
+
+function usage() {
+  console.log(
+    "Usage: scripts/codex-review-commit --sha <commit-sha> --trigger <post-commit|manual>\n",
+  );
+}
+
+function stableValue(value) {
+  return String(value ?? "").trim();
+}
+
+function parseInteger(value, fallback) {
+  const parsed = Number.parseInt(stableValue(value), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseArgs(argv) {
+  const args = {
+    sha: "",
+    trigger: "",
+  };
+  for (let index = 2; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const next = argv[index + 1];
+    switch (arg) {
+      case "--sha":
+        args.sha = stableValue(next);
+        index += 1;
+        break;
+      case "--trigger":
+        args.trigger = stableValue(next);
+        index += 1;
+        break;
+      case "-h":
+      case "--help":
+        usage();
+        process.exit(0);
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+  if (!args.sha || !args.trigger) {
+    throw new Error("Both --sha and --trigger are required");
+  }
+  if (!["post-commit", "manual"].includes(args.trigger)) {
+    throw new Error(`Invalid --trigger: ${args.trigger}`);
+  }
+  return args;
+}
+
+function checkGitCommit(repoRoot, sha) {
+  const result = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`], {
+    cwd: repoRoot,
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
+function checkCodexAvailable() {
+  const version = spawnSync("codex", ["--version"], { stdio: "ignore" });
+  if (version.status !== 0) {
+    return { ok: false, reason: "runner_unavailable", summary: "Codex CLI is not available on PATH." };
+  }
+
+  const auth = spawnSync("codex", ["login", "status"], { stdio: "ignore" });
+  if (auth.status !== 0) {
+    return {
+      ok: false,
+      reason: "runner_unavailable",
+      summary: "Codex CLI is not authenticated. Run `codex login` and retry.",
+    };
+  }
+
+  return { ok: true, reason: "", summary: "" };
+}
+
+function gitShow(repoRoot, sha) {
+  const result = spawnSync(
+    "git",
+    ["show", "--stat", "--patch", "--find-renames", "--unified=3", "--format=fuller", sha],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(stableValue(result.stderr) || `git show failed for ${sha}`);
+  }
+  return result.stdout ?? "";
+}
+
+function buildPrompt({ repoName, sha, trigger, diffText, truncated }) {
+  return [
+    "Review this single git commit for actionable correctness issues.",
+    "Report only concrete bugs, regressions, broken invariants, missing error handling, or security issues introduced by the commit.",
+    "Do not report style issues, cleanup ideas, naming preferences, or optional refactors.",
+    "Only include findings when the changed commit provides enough evidence.",
+    "If there are no actionable issues, return an empty findings array and a short summary.",
+    "",
+    `Repository: ${repoName}`,
+    `Commit: ${sha}`,
+    `Trigger: ${trigger}`,
+    truncated ? "Note: the diff was truncated to fit the review prompt budget." : "",
+    "",
+    "Commit diff follows:",
+    "",
+    diffText,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function acquireLock(lockDir) {
+  try {
+    await mkdir(lockDir, { recursive: false, mode: 0o700 });
+    const ownerPath = path.join(lockDir, "owner.json");
+    await writeFile(
+      ownerPath,
+      `${JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() }, null, 2)}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+    return { acquired: true };
+  } catch (error) {
+    if (error?.code !== "EEXIST") {
+      throw error;
+    }
+  }
+
+  const ownerPath = path.join(lockDir, "owner.json");
+  try {
+    const parsed = JSON.parse(await readFile(ownerPath, "utf8"));
+    const pid = Number.parseInt(stableValue(parsed?.pid), 10);
+    if (Number.isInteger(pid) && pid > 0) {
+      try {
+        process.kill(pid, 0);
+        return { acquired: false };
+      } catch {
+        await rm(lockDir, { recursive: true, force: true });
+        return acquireLock(lockDir);
+      }
+    }
+  } catch {
+    await rm(lockDir, { recursive: true, force: true });
+    return acquireLock(lockDir);
+  }
+
+  return { acquired: false };
+}
+
+function buildReport({
+  sha,
+  trigger,
+  repoName,
+  repoRoot,
+  reviewStatus,
+  failureReason = "",
+  summary,
+  findings,
+}) {
+  return {
+    schema_version: 2,
+    sha,
+    trigger_last: trigger,
+    review_status: reviewStatus,
+    failure_reason: failureReason,
+    last_reviewed: new Date().toISOString(),
+    summary: stableValue(summary),
+    findings: Array.isArray(findings) ? findings : [],
+    repository: {
+      name: repoName,
+      root: repoRoot,
+    },
+    finding_models: ["codex-cli"],
+  };
+}
+
+async function persistReport({ reviewsDir, sha, report }) {
+  await mkdir(reviewsDir, { recursive: true, mode: 0o700 });
+  const targetJson = path.join(reviewsDir, `${sha}.json`);
+  const targetMd = path.join(reviewsDir, `${sha}.md`);
+  writeReviewArtifacts({ report, targetJson, targetMd });
+}
+
+async function main() {
+  if ((process.env.CODEX_REVIEW_ENABLED ?? "1").trim() === "0") {
+    return;
+  }
+
+  const args = parseArgs(process.argv);
+  const repoRoot = resolveRepoRoot(process.cwd());
+  const repoName = path.basename(repoRoot);
+  if (!checkGitCommit(repoRoot, args.sha)) {
+    throw new Error(`Commit not found: ${args.sha}`);
+  }
+
+  const reviewsDir = await resolveReviewsDir(repoRoot);
+  const lockDir = path.join(reviewsDir, `${args.sha}.review.lock`);
+  const { acquired } = await acquireLock(lockDir);
+  if (!acquired) {
+    return;
+  }
+
+  try {
+    const codexStatus = checkCodexAvailable();
+    if (!codexStatus.ok) {
+      const report = buildReport({
+        sha: args.sha,
+        trigger: args.trigger,
+        repoName,
+        repoRoot,
+        reviewStatus: "failed",
+        failureReason: codexStatus.reason,
+        summary: codexStatus.summary,
+        findings: [],
+      });
+      await persistReport({ reviewsDir, sha: args.sha, report });
+      process.exitCode = 1;
+      return;
+    }
+
+    const diffText = gitShow(repoRoot, args.sha);
+    const maxPromptChars = parseInteger(process.env.CODEX_REVIEW_MAX_PROMPT_CHARS ?? "200000", 200000);
+    const truncated = diffText.length > maxPromptChars;
+    const prompt = buildPrompt({
+      repoName,
+      sha: args.sha,
+      trigger: args.trigger,
+      diffText: truncated ? `${diffText.slice(0, maxPromptChars)}\n\n[diff truncated]` : diffText,
+      truncated,
+    });
+
+    const outputDir = path.join(reviewsDir, "logs");
+    await mkdir(outputDir, { recursive: true, mode: 0o700 });
+    const outputPath = path.join(outputDir, `${args.sha}.codex-output.json`);
+    const timeoutMs = parseInteger(process.env.CODEX_REVIEW_TIMEOUT_SECONDS ?? "600", 600) * 1000;
+    const schemaPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "codex-review-output.schema.json");
+    const result = spawnSync(
+      "codex",
+      ["exec", "--output-schema", schemaPath, "-o", outputPath, "-"],
+      {
+        cwd: repoRoot,
+        input: prompt,
+        encoding: "utf8",
+        timeout: timeoutMs,
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+
+    if (result.error?.code === "ETIMEDOUT" || result.status !== 0) {
+      const report = buildReport({
+        sha: args.sha,
+        trigger: args.trigger,
+        repoName,
+        repoRoot,
+        reviewStatus: "failed",
+        failureReason: result.error?.code === "ETIMEDOUT" ? "timed_out" : "codex_exec_failed",
+        summary:
+          result.error?.code === "ETIMEDOUT"
+            ? `Codex review timed out for commit ${args.sha}.`
+            : stableValue(result.stderr) || `Codex review failed for commit ${args.sha}.`,
+        findings: [],
+      });
+      await persistReport({ reviewsDir, sha: args.sha, report });
+      process.exitCode = 1;
+      return;
+    }
+
+    const parsedOutput = JSON.parse(await readFile(outputPath, "utf8"));
+    const normalized = normalizeModelOutput(parsedOutput);
+    const report = buildReport({
+      sha: args.sha,
+      trigger: args.trigger,
+      repoName,
+      repoRoot,
+      reviewStatus: "ok",
+      summary: normalized.summary || "Review completed.",
+      findings: normalized.findings,
+    });
+    await persistReport({ reviewsDir, sha: args.sha, report });
+  } catch (error) {
+    const report = buildReport({
+      sha: args.sha,
+      trigger: args.trigger,
+      repoName,
+      repoRoot,
+      reviewStatus: "failed",
+      failureReason: "postprocess_error",
+      summary: error instanceof Error ? error.message : String(error),
+      findings: [],
+    });
+    await persistReport({ reviewsDir, sha: args.sha, report });
+    process.exitCode = 1;
+  } finally {
+    await rm(lockDir, { recursive: true, force: true });
+  }
+}
+
+main().catch((error) => {
+  console.error(`[codex-review-commit] ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+});

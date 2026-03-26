@@ -1,0 +1,89 @@
+#!/usr/bin/env node
+
+import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { findingSignature } from "./lib/codex-review-findings.mjs";
+import { resolveRepoRoot, resolveReviewsDir } from "./codex-review-inbox-lib.mjs";
+import { appendDismissal } from "./codex-review-push-gate-lib.mjs";
+
+function stableValue(value) {
+  return String(value ?? "").trim();
+}
+
+function parseArgs(argv) {
+  const args = {
+    sha: "",
+    index: 0,
+  };
+  for (let index = 2; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const next = argv[index + 1];
+    switch (arg) {
+      case "--sha":
+        args.sha = stableValue(next).toLowerCase();
+        index += 1;
+        break;
+      case "--index":
+        args.index = Number.parseInt(stableValue(next), 10);
+        index += 1;
+        break;
+      case "-h":
+      case "--help":
+        console.log("Usage: scripts/codex-review-dismiss-finding --sha <sha> --index <1-based-index>");
+        process.exit(0);
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+  if (!args.sha || !Number.isInteger(args.index) || args.index <= 0) {
+    throw new Error("--sha and a positive 1-based --index are required");
+  }
+  return args;
+}
+
+function currentBranchName(repoRoot) {
+  const result = spawnSync("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0) {
+    throw new Error("Dismissals require an attached local branch");
+  }
+  return stableValue(result.stdout);
+}
+
+async function main() {
+  const args = parseArgs(process.argv);
+  const repoRoot = resolveRepoRoot(process.cwd());
+  const reviewsDir = await resolveReviewsDir(repoRoot);
+  const reportPath = path.join(reviewsDir, `${args.sha}.json`);
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  const findings = Array.isArray(report?.findings) ? report.findings : [];
+  const finding = findings[args.index - 1];
+  if (!finding) {
+    throw new Error(`Finding index ${args.index} does not exist for ${args.sha}`);
+  }
+  const branchName = currentBranchName(repoRoot);
+  const dismissalsPath = await appendDismissal({
+    repoRoot,
+    branchName,
+    sha: args.sha,
+    signature: findingSignature(finding),
+  });
+  console.log(
+    `[codex-review-dismiss-finding] dismissed sha=${args.sha} index=${args.index} branch=${branchName} file=${dismissalsPath}`,
+  );
+}
+
+if (import.meta.url === pathToFileURL(path.resolve(process.argv[1] ?? "")).href) {
+  main().catch((error) => {
+    console.error(
+      `[codex-review-dismiss-finding] ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exit(1);
+  });
+}

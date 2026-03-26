@@ -1,0 +1,117 @@
+#!/usr/bin/env node
+
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { resolveRepoRoot, resolveReviewsDir } from "./codex-review-inbox-lib.mjs";
+import { defaultGitExec, executePushGate, parseMinSeverity } from "./codex-review-push-gate-lib.mjs";
+
+function stableValue(value) {
+  return String(value ?? "").trim();
+}
+
+function parseInteger(value, fallback) {
+  const parsed = Number.parseInt(stableValue(value), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseArgs(argv) {
+  const args = {
+    stdinFile: "",
+    remoteName: "",
+    reviewsDir: stableValue(process.env.CODEX_REVIEW_DIR),
+    timeoutSeconds: parseInteger(process.env.CODEX_REVIEW_PUSH_GATE_TIMEOUT_SECONDS ?? "300", 300),
+    minSeverity: parseMinSeverity(process.env.CODEX_REVIEW_PUSH_GATE_MIN_SEVERITY ?? "major"),
+  };
+
+  for (let index = 2; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const next = argv[index + 1];
+    switch (arg) {
+      case "--stdin-file":
+        args.stdinFile = stableValue(next);
+        index += 1;
+        break;
+      case "--remote-name":
+        args.remoteName = stableValue(next);
+        index += 1;
+        break;
+      case "--reviews-dir":
+        args.reviewsDir = stableValue(next);
+        index += 1;
+        break;
+      case "--timeout-seconds":
+        args.timeoutSeconds = parseInteger(next, args.timeoutSeconds);
+        index += 1;
+        break;
+      case "--min-severity":
+        args.minSeverity = parseMinSeverity(next);
+        index += 1;
+        break;
+      case "-h":
+      case "--help":
+        console.log("Usage: scripts/codex-review-push-gate --stdin-file <path> [--remote-name <name>]");
+        process.exit(0);
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  if (!args.stdinFile) {
+    throw new Error("--stdin-file is required");
+  }
+
+  return args;
+}
+
+async function main() {
+  if ((process.env.CODEX_REVIEW_ENABLED ?? "1").trim() === "0") {
+    return;
+  }
+  if ((process.env.CODEX_REVIEW_PUSH_GATE_ENABLED ?? "1").trim() === "0") {
+    return;
+  }
+  if ((process.env.CODEX_REVIEW_PUSH_GATE_BYPASS ?? "0").trim() === "1") {
+    console.log("[codex-review-push-gate] WARNING: bypass enabled");
+    return;
+  }
+
+  const args = parseArgs(process.argv);
+  const repoRoot = resolveRepoRoot(process.cwd());
+  const reviewsDir = await resolveReviewsDir(repoRoot, args.reviewsDir);
+  const stdinText = await readFile(args.stdinFile, "utf8");
+
+  const result = await executePushGate({
+    repoRoot,
+    reviewsDir,
+    stdinText,
+    remoteName: args.remoteName,
+    minSeverity: args.minSeverity,
+    timeoutMs: Math.max(0, args.timeoutSeconds) * 1000,
+    gitExec: (gitArgs) => defaultGitExec(gitArgs, repoRoot),
+  });
+
+  if (result.blocked.length > 0) {
+    console.error(
+      `[codex-review-push-gate] FAIL blocked=${result.summary.blocked} actionable=${result.summary.actionable}`,
+    );
+    for (const entry of result.blocked) {
+      console.error(
+        `- ${entry.sha} status=${entry.status} severity=${entry.severity} findings=${entry.findings} reason=${entry.reason}`,
+      );
+    }
+    process.exit(1);
+  }
+
+  console.log(
+    `[codex-review-push-gate] PASS shas=${result.summary.shas} sync_reruns=${result.summary.sync_reruns} actionable=${result.summary.actionable}`,
+  );
+}
+
+if (import.meta.url === pathToFileURL(path.resolve(process.argv[1] ?? "")).href) {
+  main().catch((error) => {
+    console.error(`[codex-review-push-gate] ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}

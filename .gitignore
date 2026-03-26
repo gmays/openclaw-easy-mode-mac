@@ -86,6 +86,7 @@ apps/ios/*.mobileprovision
 .local/
 docs/.local/
 tmp/
+.code-reviews/
 IDENTITY.md
 USER.md
 .tgz
