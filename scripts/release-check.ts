@@ -36,7 +36,9 @@ const forbiddenPrefixes = ["dist-runtime/", "dist/OpenClaw.app/"];
 const npmPackUnpackedSizeBudgetBytes = 190 * 1024 * 1024;
 const appcastConfigs = [
   { path: resolve("appcast.xml"), allowEmpty: false, required: true },
-  { path: resolve("appcast-easy-mode.xml"), allowEmpty: false, required: true },
+  // Easy Mode packages embed this feed URL already, but the checked-in feed can
+  // still be empty between releases. Keep push CI aligned with that repo state.
+  { path: resolve("appcast-easy-mode.xml"), allowEmpty: true, required: false },
 ] as const;
 const laneBuildMin = 1_000_000_000;
 const laneFloorAdoptionDateKey = 20260227;
