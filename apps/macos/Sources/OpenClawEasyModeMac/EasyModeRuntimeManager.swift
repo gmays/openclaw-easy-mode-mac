@@ -45,6 +45,7 @@ final class EasyModeRuntimeManager {
     private var gatewayStdoutTask: Task<Void, Never>?
     private var currentPort: Int?
     private var authToken: String?
+    private var launchGeneration = 0
 
     var isRunning: Bool {
         if case .running = self.status {
@@ -57,6 +58,7 @@ final class EasyModeRuntimeManager {
         if self.isRunning || self.status == .starting {
             return
         }
+        let launchGeneration = self.nextLaunchGeneration()
         do {
             self.status = .starting
             self.gatewayLog = ""
@@ -66,34 +68,63 @@ final class EasyModeRuntimeManager {
 
             let port = try Self.reserveLoopbackPort()
             let token = UUID().uuidString
-            let process = try self.makeGatewayProcess(port: port, token: token)
+            let endpointURL = URL(string: "ws://127.0.0.1:\(port)")!
+            let process = try self.makeGatewayProcess(
+                port: port,
+                token: token,
+                launchGeneration: launchGeneration)
             try process.run()
 
             self.gatewayProcess = process
             self.currentPort = port
             self.authToken = token
-            await EasyModeGatewayConnection.shared.setEndpoint(
-                url: URL(string: "ws://127.0.0.1:\(port)")!,
-                token: token)
             self.captureGatewayOutput(process: process)
-            guard await Self.waitForGatewayReady(isProcessRunning: { process.isRunning }, healthCheck: {
-                try await EasyModeGatewayConnection.shared.healthOK(timeoutMs: 1_500)
-            }) else {
+            await EasyModeGatewayConnection.shared.setEndpoint(url: endpointURL, token: token)
+            guard self.isCurrentLaunch(launchGeneration, process: process) else {
+                process.terminate()
+                return
+            }
+            guard await Self.waitForGatewayReady(
+                isProcessRunning: { process.isRunning },
+                shouldContinue: {
+                    await MainActor.run {
+                        self.isCurrentLaunch(launchGeneration, process: process)
+                    }
+                },
+                healthCheck: {
+                    try await EasyModeGatewayConnection.probeHealth(
+                        url: endpointURL,
+                        token: token,
+                        timeoutMs: 1_500)
+                }
+            ) else {
+                guard self.isCurrentLaunch(launchGeneration, process: process) else {
+                    process.terminate()
+                    return
+                }
                 process.terminate()
                 throw NSError(
                     domain: "EasyModeRuntime",
                     code: 3,
                     userInfo: [NSLocalizedDescriptionKey: "Gateway did not become ready in time."])
             }
+            guard self.isCurrentLaunch(launchGeneration, process: process) else {
+                process.terminate()
+                return
+            }
             self.status = .running(port: port)
             self.lastError = nil
         } catch {
+            guard self.isCurrentLaunch(launchGeneration) else {
+                return
+            }
             self.status = .failed(error.localizedDescription)
             self.lastError = error.localizedDescription
         }
     }
 
     func stop() async {
+        self.nextLaunchGeneration()
         self.gatewayStdoutTask?.cancel()
         self.gatewayStdoutTask = nil
         self.gatewayProcess?.terminate()
@@ -208,7 +239,22 @@ final class EasyModeRuntimeManager {
         try accessStore.refreshRuntimeManifest()
     }
 
-    private func makeGatewayProcess(port: Int, token: String) throws -> Process {
+    private func nextLaunchGeneration() -> Int {
+        self.launchGeneration += 1
+        return self.launchGeneration
+    }
+
+    private func isCurrentLaunch(_ launchGeneration: Int, process: Process? = nil) -> Bool {
+        guard self.launchGeneration == launchGeneration else {
+            return false
+        }
+        guard let process else {
+            return true
+        }
+        return self.gatewayProcess === process
+    }
+
+    private func makeGatewayProcess(port: Int, token: String, launchGeneration: Int) throws -> Process {
         let process = Process()
         let command = try self.gatewayCommand(port: port, token: token)
         process.executableURL = command.executable
@@ -219,7 +265,7 @@ final class EasyModeRuntimeManager {
         process.standardError = pipe
         process.terminationHandler = { [weak self] process in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.isCurrentLaunch(launchGeneration, process: process) else { return }
                 self.gatewayStdoutTask?.cancel()
                 self.gatewayStdoutTask = nil
                 self.gatewayProcess = nil
@@ -400,10 +446,14 @@ final class EasyModeRuntimeManager {
         timeout: TimeInterval = 6,
         sleepNanoseconds: UInt64 = 300_000_000,
         isProcessRunning: @escaping () -> Bool,
+        shouldContinue: @escaping () async -> Bool = { true },
         healthCheck: @escaping () async throws -> Bool,
     ) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            if !(await shouldContinue()) {
+                return false
+            }
             if !isProcessRunning() {
                 return false
             }

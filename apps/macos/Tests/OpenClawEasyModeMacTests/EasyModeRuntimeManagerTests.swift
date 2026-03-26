@@ -108,6 +108,22 @@ struct EasyModeRuntimeManagerTests {
 
         #expect(!ready)
     }
+
+    @Test
+    func `wait for gateway ready stops when launch attempt is superseded`() async {
+        let attempts = LockedCounter()
+        let ready = await EasyModeRuntimeManager.waitForGatewayReady(
+            timeout: 0.2,
+            sleepNanoseconds: 1_000_000,
+            isProcessRunning: { true },
+            shouldContinue: {
+                await attempts.incrementAndGet() < 3
+            },
+            healthCheck: { false })
+
+        #expect(!ready)
+        #expect(await attempts.value == 3)
+    }
 }
 
 actor LockedCounter {

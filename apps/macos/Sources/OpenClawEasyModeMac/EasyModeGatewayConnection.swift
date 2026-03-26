@@ -91,6 +91,19 @@ actor EasyModeGatewayConnection {
         return (try? self.decoder.decode(OpenClawGatewayHealthOK.self, from: data))?.ok ?? true
     }
 
+    static func probeHealth(url: URL, token: String, timeoutMs: Int = 5_000) async throws -> Bool {
+        let channel = GatewayChannelActor(url: url, token: token)
+        let decoder = JSONDecoder()
+        do {
+            let data = try await channel.request(method: "health", timeoutMs: Double(timeoutMs))
+            await channel.shutdown()
+            return (try? decoder.decode(OpenClawGatewayHealthOK.self, from: data))?.ok ?? true
+        } catch {
+            await channel.shutdown()
+            throw error
+        }
+    }
+
     func chatHistory(sessionKey: String) async throws -> OpenClawChatHistoryPayload {
         try await self.requestDecoded(
             method: "chat.history",
