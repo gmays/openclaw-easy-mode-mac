@@ -53,6 +53,7 @@ final class EasyModeRuntimeManager {
         }
         do {
             self.status = .starting
+            self.gatewayLog = ""
             try EasyModeProduct.ensureDirectories()
             try EasyModeConfigFile.ensureSeedConfig()
             try self.writeAllowedRootsManifest(accessStore: accessStore)
@@ -100,7 +101,7 @@ final class EasyModeRuntimeManager {
     func saveTelegramToken(_ token: String) {
         do {
             try EasyModeConfigFile.setTelegramBotToken(token)
-            self.telegramToken = token
+            self.telegramToken = EasyModeConfigFile.telegramBotToken()
             self.lastError = nil
         } catch {
             self.lastError = error.localizedDescription
@@ -120,6 +121,7 @@ final class EasyModeRuntimeManager {
             self.authStatus = output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "ChatGPT/Codex sign-in completed."
                 : output.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.lastError = nil
         } catch {
             self.authStatus = "Sign-in failed"
             self.lastError = error.localizedDescription
@@ -131,6 +133,7 @@ final class EasyModeRuntimeManager {
             let result = try await EasyModeGatewayConnection.shared.startWhatsAppLogin(force: force)
             self.whatsappMessage = result.message
             self.whatsappQrDataUrl = result.qrDataUrl
+            self.lastError = nil
             if result.qrDataUrl != nil {
                 Task {
                     await self.waitForWhatsAppLogin()
@@ -148,6 +151,7 @@ final class EasyModeRuntimeManager {
             if result.connected {
                 self.whatsappQrDataUrl = nil
             }
+            self.lastError = nil
         } catch {
             self.lastError = error.localizedDescription
         }
@@ -159,7 +163,11 @@ final class EasyModeRuntimeManager {
             if channel == "whatsapp" {
                 self.whatsappMessage = "Logged out."
                 self.whatsappQrDataUrl = nil
+            } else if channel == "telegram" {
+                try EasyModeConfigFile.setTelegramBotToken("")
+                self.telegramToken = ""
             }
+            self.lastError = nil
         } catch {
             self.lastError = error.localizedDescription
         }
@@ -302,25 +310,26 @@ final class EasyModeRuntimeManager {
     }
 
     private func resolveBundledNode() -> URL? {
-        Bundle.main.resourceURL?
+        let candidate = Bundle.main.resourceURL?
             .appendingPathComponent("runtime", isDirectory: true)
             .appendingPathComponent("node", isDirectory: false)
+        guard let candidate else {
+            return nil
+        }
+        return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
     }
 
     private func resolveRuntimeEntrypoint() throws -> URL {
-        if let bundled = Bundle.main.resourceURL?
-            .appendingPathComponent("openclaw-runtime", isDirectory: true)
-            .appendingPathComponent("dist", isDirectory: true)
-            .appendingPathComponent("index.js"),
-           FileManager.default.fileExists(atPath: bundled.path)
-        {
-            return bundled
+        if let resourceURL = Bundle.main.resourceURL {
+            let bundledRoot = resourceURL.appendingPathComponent("openclaw-runtime", isDirectory: true)
+            if let entry = Self.resolveRuntimeEntrypoint(in: bundledRoot) {
+                return entry
+            }
         }
 
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         for candidate in Self.searchRoots(startingAt: cwd) {
-            let entry = candidate.appendingPathComponent("dist/index.js")
-            if FileManager.default.fileExists(atPath: entry.path) {
+            if let entry = Self.resolveRuntimeEntrypoint(in: candidate) {
                 return entry
             }
         }
@@ -329,6 +338,19 @@ final class EasyModeRuntimeManager {
             domain: "EasyModeRuntime",
             code: 2,
             userInfo: [NSLocalizedDescriptionKey: "Bundled OpenClaw runtime is missing."])
+    }
+
+    private static func resolveRuntimeEntrypoint(in root: URL) -> URL? {
+        let candidates = [
+            root.appendingPathComponent("dist/index.js"),
+            root.appendingPathComponent("dist/index.mjs"),
+            root.appendingPathComponent("openclaw.mjs"),
+            root.appendingPathComponent("bin/openclaw.js"),
+        ]
+        for candidate in candidates where FileManager.default.fileExists(atPath: candidate.path) {
+            return candidate
+        }
+        return nil
     }
 
     private static func searchRoots(startingAt start: URL) -> [URL] {

@@ -231,6 +231,18 @@ cat > "$ENT_TMP_RUNTIME" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.inherit</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <key>com.apple.security.files.bookmarks.app-scope</key>
+    <true/>
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
@@ -345,7 +357,11 @@ if [ -d "$APP_BUNDLE/Contents/Resources" ]; then
   find "$APP_BUNDLE/Contents/Resources" -type f -print0 | while IFS= read -r -d '' f; do
     if /usr/bin/file "$f" | /usr/bin/grep -q "Mach-O"; then
       echo "Signing embedded runtime: $f"
-      sign_plain_item "$f"
+      if [[ "$APP_MODE" == "easy-mode" && "$f" == *"/Contents/Resources/runtime/"* ]]; then
+        sign_item "$f" "$ENT_TMP_RUNTIME"
+      else
+        sign_plain_item "$f"
+      fi
     fi
   done
 fi

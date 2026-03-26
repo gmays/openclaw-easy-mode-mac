@@ -180,11 +180,11 @@ else
   echo "📦 Skipping JS build (SKIP_TSC=1)"
 fi
 
-if [[ "${SKIP_UI_BUILD:-0}" != "1" ]]; then
+if [[ "$INCLUDE_CONTROL_UI" == "1" && "${SKIP_UI_BUILD:-0}" != "1" ]]; then
   echo "🖥  Building Control UI (ui:build)"
   (cd "$ROOT_DIR" && node scripts/ui.js build)
 else
-  echo "🖥  Skipping Control UI build (SKIP_UI_BUILD=1)"
+  echo "🖥  Skipping Control UI build"
 fi
 
 cd "$ROOT_DIR/apps/macos"
@@ -334,9 +334,12 @@ fi
 
 if [[ "$INCLUDE_BUNDLED_RUNTIME" == "1" ]]; then
   echo "📦 Copying bundled Easy Mode runtime"
-  mkdir -p "$APP_ROOT/Contents/Resources/openclaw-runtime/dist"
-  rm -rf "$APP_ROOT/Contents/Resources/openclaw-runtime/dist"
-  cp -R "$ROOT_DIR/dist" "$APP_ROOT/Contents/Resources/openclaw-runtime/"
+  RUNTIME_DEST="$APP_ROOT/Contents/Resources/openclaw-runtime/dist"
+  rm -rf "$APP_ROOT/Contents/Resources/openclaw-runtime"
+  mkdir -p "$RUNTIME_DEST"
+  while IFS= read -r -d '' runtime_entry; do
+    cp -R "$runtime_entry" "$RUNTIME_DEST/"
+  done < <(find "$ROOT_DIR/dist" -mindepth 1 -maxdepth 1 ! -name "*.app" -print0)
   NODE_PATH="$(node -p "process.execPath")"
   if [ -x "$NODE_PATH" ]; then
     mkdir -p "$APP_ROOT/Contents/Resources/runtime"

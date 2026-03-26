@@ -74,6 +74,16 @@ enum EasyModeConfigFile {
             root["gateway"] = ["bind": "loopback"]
             didChange = true
         }
+        let agents = root["agents"] as? [String: Any] ?? [:]
+        let defaults = agents["defaults"] as? [String: Any] ?? [:]
+        if (defaults["workspace"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            var nextDefaults = defaults
+            nextDefaults["workspace"] = EasyModeProduct.workspaceURL.path
+            var nextAgents = agents
+            nextAgents["defaults"] = nextDefaults
+            root["agents"] = nextAgents
+            didChange = true
+        }
         if didChange {
             try self.saveRoot(root)
         }

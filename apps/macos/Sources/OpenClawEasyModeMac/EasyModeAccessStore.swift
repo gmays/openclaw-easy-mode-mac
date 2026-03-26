@@ -72,11 +72,19 @@ final class EasyModeAccessStore {
 
     private func addGrant(url: URL) throws {
         let accessStarted = url.startAccessingSecurityScopedResource()
-        defer {
-            if !accessStarted {
-                url.stopAccessingSecurityScopedResource()
+        guard accessStarted else {
+            throw NSError(
+                domain: "EasyModeAccessStore",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to access the selected folder."])
+        }
+        let existingGrants = self.grants.filter { $0.path == url.path }
+        for existing in existingGrants {
+            if let activeUrl = self.activeUrls.removeValue(forKey: existing.id) {
+                activeUrl.stopAccessingSecurityScopedResource()
             }
         }
+        self.grants.removeAll { $0.path == url.path }
         let bookmark = try url.bookmarkData(
             options: [.withSecurityScope],
             includingResourceValuesForKeys: nil,
@@ -86,7 +94,6 @@ final class EasyModeAccessStore {
             path: url.path,
             bookmarkDataBase64: bookmark.base64EncodedString())
         self.activeUrls[grant.id] = url
-        self.grants.removeAll { $0.path == url.path }
         self.grants.append(grant)
         self.grants.sort { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending }
         self.persist()
@@ -123,20 +130,35 @@ final class EasyModeAccessStore {
                 continue
             }
             var stale = false
+            var resolvedUrl: URL?
             do {
                 let url = try URL(
                     resolvingBookmarkData: data,
                     options: [.withSecurityScope],
                     relativeTo: nil,
                     bookmarkDataIsStale: &stale)
-                _ = url.startAccessingSecurityScopedResource()
+                resolvedUrl = url
+                guard url.startAccessingSecurityScopedResource() else {
+                    self.lastError = "Failed to restore access for \(grant.path)."
+                    continue
+                }
+                let bookmarkDataBase64: String
+                if stale {
+                    bookmarkDataBase64 = try url.bookmarkData(
+                        options: [.withSecurityScope],
+                        includingResourceValuesForKeys: nil,
+                        relativeTo: nil).base64EncodedString()
+                } else {
+                    bookmarkDataBase64 = grant.bookmarkDataBase64
+                }
                 self.activeUrls[grant.id] = url
                 resolved.append(
                     Grant(
                         id: grant.id,
                         path: url.path,
-                        bookmarkDataBase64: stale ? try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil).base64EncodedString() : grant.bookmarkDataBase64))
+                        bookmarkDataBase64: bookmarkDataBase64))
             } catch {
+                resolvedUrl?.stopAccessingSecurityScopedResource()
                 self.lastError = error.localizedDescription
             }
         }

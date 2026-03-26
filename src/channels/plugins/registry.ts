@@ -1,4 +1,4 @@
-import { filterEasyModeChannels } from "../../easy-mode/policy.js";
+import { filterEasyModeChannels, isEasyModeChannelAllowed } from "../../easy-mode/policy.js";
 import {
   getActivePluginChannelRegistryVersion,
   requireActivePluginChannelRegistry,
@@ -73,6 +73,9 @@ export function listChannelPlugins(): ChannelPlugin[] {
 export function getChannelPlugin(id: ChannelId): ChannelPlugin | undefined {
   const resolvedId = String(id).trim();
   if (!resolvedId) {
+    return undefined;
+  }
+  if (!isEasyModeChannelAllowed(resolvedId)) {
     return undefined;
   }
   return resolveCachedChannelPlugins().byId.get(resolvedId);

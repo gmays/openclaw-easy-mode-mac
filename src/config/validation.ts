@@ -235,6 +235,7 @@ function validateGatewayTailscaleBind(config: OpenClawConfig): ConfigValidationI
  */
 export function validateConfigObjectRaw(
   raw: unknown,
+  params?: { env?: NodeJS.ProcessEnv },
 ): { ok: true; config: OpenClawConfig } | { ok: false; issues: ConfigValidationIssue[] } {
   const normalizedRaw = normalizeLegacyWebSearchConfig(raw);
   const legacyIssues = findLegacyConfigIssues(normalizedRaw);
@@ -274,7 +275,7 @@ export function validateConfigObjectRaw(
   if (gatewayTailscaleBindIssues.length > 0) {
     return { ok: false, issues: gatewayTailscaleBindIssues };
   }
-  const easyModeIssues = validateEasyModeConfig(validated.data as OpenClawConfig);
+  const easyModeIssues = validateEasyModeConfig(validated.data as OpenClawConfig, params?.env);
   if (easyModeIssues.length > 0) {
     return { ok: false, issues: easyModeIssues };
   }
@@ -286,8 +287,9 @@ export function validateConfigObjectRaw(
 
 export function validateConfigObject(
   raw: unknown,
+  params?: { env?: NodeJS.ProcessEnv },
 ): { ok: true; config: OpenClawConfig } | { ok: false; issues: ConfigValidationIssue[] } {
-  const result = validateConfigObjectRaw(raw);
+  const result = validateConfigObjectRaw(raw, params);
   if (!result.ok) {
     return result;
   }
@@ -327,7 +329,9 @@ function validateConfigObjectWithPluginsBase(
   raw: unknown,
   opts: { applyDefaults: boolean; env?: NodeJS.ProcessEnv },
 ): ValidateConfigWithPluginsResult {
-  const base = opts.applyDefaults ? validateConfigObject(raw) : validateConfigObjectRaw(raw);
+  const base = opts.applyDefaults
+    ? validateConfigObject(raw, { env: opts.env })
+    : validateConfigObjectRaw(raw, { env: opts.env });
   if (!base.ok) {
     return { ok: false, issues: base.issues, warnings: [] };
   }

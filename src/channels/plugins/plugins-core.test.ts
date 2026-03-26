@@ -47,7 +47,7 @@ import {
   resolveChannelConfigWrites,
   resolveConfigWriteTargetFromPath,
 } from "./config-writes.js";
-import { listChannelPlugins } from "./index.js";
+import { getChannelPlugin, listChannelPlugins } from "./index.js";
 import { loadChannelPlugin } from "./load.js";
 import { loadChannelOutboundAdapter } from "./outbound/load.js";
 import type { ChannelDirectoryEntry, ChannelOutboundAdapter, ChannelPlugin } from "./types.js";
@@ -116,6 +116,28 @@ describe("channel plugin registry", () => {
     setActivePluginRegistry(registry, "registry-test");
 
     expect(listChannelPlugins().map((plugin) => plugin.id)).toEqual(["telegram"]);
+  });
+
+  it("hides disallowed channels from direct lookups in Easy Mode", async () => {
+    const registry = createTestRegistry(
+      ["telegram", "discord", "whatsapp"].map((id) => ({
+        pluginId: id,
+        plugin: createPlugin(id),
+        source: "test",
+      })),
+    );
+    setActivePluginRegistry(registry);
+
+    await withEnvAsync(
+      {
+        OPENCLAW_PRODUCT_MODE: "easy-mode-mac",
+      },
+      async () => {
+        expect(listChannelPlugins().map((plugin) => plugin.id)).toEqual(["telegram", "whatsapp"]);
+        expect(getChannelPlugin("discord")).toBeUndefined();
+        expect(getChannelPlugin("telegram")?.id).toBe("telegram");
+      },
+    );
   });
 });
 
