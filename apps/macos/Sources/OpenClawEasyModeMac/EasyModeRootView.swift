@@ -1,11 +1,13 @@
 import AppKit
 import Observation
 import OpenClawChatUI
+import OpenClawMacUpdates
 import SwiftUI
 
 struct EasyModeRootView: View {
     @Bindable var runtimeManager: EasyModeRuntimeManager
     @Bindable var accessStore: EasyModeAccessStore
+    let updater: UpdaterProviding?
     @State private var selectedTab: EasyModeTab = .chat
     @State private var chatViewModel: OpenClawChatViewModel?
     @State private var telegramDraft: String = EasyModeConfigFile.telegramBotToken()
@@ -57,9 +59,9 @@ struct EasyModeRootView: View {
                     userAccent: Color.orange)
             } else {
                 ContentUnavailableView(
-                    "Gateway Starting",
+                    self.chatStatusTitle,
                     systemImage: "message.badge.circle",
-                    description: Text("Start Easy Mode to open chat."))
+                    description: Text(self.chatStatusDescription))
             }
         }
     }
@@ -167,6 +169,7 @@ struct EasyModeRootView: View {
                         HStack(spacing: 12) {
                             Button("Save Bot Token") {
                                 self.runtimeManager.saveTelegramToken(self.telegramDraft)
+                                self.telegramDraft = self.runtimeManager.telegramToken
                             }
                             .buttonStyle(.borderedProminent)
                             Button("Logout") {
@@ -212,6 +215,8 @@ struct EasyModeRootView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            EasyModeUpdateSettingsView(updater: self.updater)
+
             if let error = self.runtimeManager.lastError {
                 Text(error)
                     .font(.caption)
@@ -241,6 +246,32 @@ struct EasyModeRootView: View {
             .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var chatStatusTitle: String {
+        switch self.runtimeManager.status {
+        case .failed(_):
+            return "Gateway Failed"
+        case .starting:
+            return "Gateway Starting"
+        case .stopped:
+            return "Gateway Unavailable"
+        case .running(_):
+            return "Preparing Chat"
+        }
+    }
+
+    private var chatStatusDescription: String {
+        switch self.runtimeManager.status {
+        case .starting:
+            return "OpenClaw Easy Mode is starting the local gateway."
+        case let .failed(reason):
+            return reason
+        case .stopped:
+            return "Start Easy Mode to open chat."
+        case .running(_):
+            return "Preparing chat."
+        }
     }
 
     private static func qrImage(from dataUrl: String) -> NSImage? {

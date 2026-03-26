@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import OpenClawMacUpdates
 import SwiftUI
 
 struct SettingsRootView: View {

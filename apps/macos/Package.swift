@@ -11,6 +11,7 @@ let package = Package(
     products: [
         .library(name: "OpenClawIPC", targets: ["OpenClawIPC"]),
         .library(name: "OpenClawDiscovery", targets: ["OpenClawDiscovery"]),
+        .library(name: "OpenClawMacUpdates", targets: ["OpenClawMacUpdates"]),
         .executable(name: "OpenClaw", targets: ["OpenClaw"]),
         .executable(name: "OpenClawEasyModeMac", targets: ["OpenClawEasyModeMac"]),
         .executable(name: "openclaw-mac", targets: ["OpenClawMacCLI"]),
@@ -40,11 +41,21 @@ let package = Package(
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),
             ]),
+        .target(
+            name: "OpenClawMacUpdates",
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
+            path: "Sources/OpenClawMacUpdates",
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency"),
+            ]),
         .executableTarget(
             name: "OpenClaw",
             dependencies: [
                 "OpenClawIPC",
                 "OpenClawDiscovery",
+                "OpenClawMacUpdates",
                 .product(name: "OpenClawKit", package: "OpenClawKit"),
                 .product(name: "OpenClawChatUI", package: "OpenClawKit"),
                 .product(name: "OpenClawProtocol", package: "OpenClawKit"),
@@ -80,6 +91,7 @@ let package = Package(
         .executableTarget(
             name: "OpenClawEasyModeMac",
             dependencies: [
+                "OpenClawMacUpdates",
                 .product(name: "OpenClawKit", package: "OpenClawKit"),
                 .product(name: "OpenClawChatUI", package: "OpenClawKit"),
                 .product(name: "OpenClawProtocol", package: "OpenClawKit"),
@@ -100,6 +112,16 @@ let package = Package(
                 .product(name: "OpenClawProtocol", package: "OpenClawKit"),
                 .product(name: "SwabbleKit", package: "swabble"),
             ],
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency"),
+                .enableExperimentalFeature("SwiftTesting"),
+            ]),
+        .testTarget(
+            name: "OpenClawEasyModeMacTests",
+            dependencies: [
+                "OpenClawEasyModeMac",
+            ],
+            path: "Tests/OpenClawEasyModeMacTests",
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),
                 .enableExperimentalFeature("SwiftTesting"),

@@ -1,7 +1,7 @@
 #!/usr/bin/env -S node --import tsx
 
 import { execSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -34,7 +34,10 @@ const forbiddenPrefixes = ["dist-runtime/", "dist/OpenClaw.app/"];
 // startup/doctor OOM reports. Keep enough headroom for the current pack with
 // restored bundled upgrade surfaces while still catching regressions quickly.
 const npmPackUnpackedSizeBudgetBytes = 190 * 1024 * 1024;
-const appcastPath = resolve("appcast.xml");
+const appcastConfigs = [
+  { path: resolve("appcast.xml"), allowEmpty: false, required: true },
+  { path: resolve("appcast-easy-mode.xml"), allowEmpty: true, required: false },
+] as const;
 const laneBuildMin = 1_000_000_000;
 const laneFloorAdoptionDateKey = 20260227;
 
@@ -154,13 +157,19 @@ function extractTag(item: string, tag: string): string | null {
   return regex.exec(item)?.[1]?.trim() ?? null;
 }
 
-export function collectAppcastSparkleVersionErrors(xml: string): string[] {
+export function collectAppcastSparkleVersionErrors(
+  xml: string,
+  options?: { allowEmpty?: boolean },
+): string[] {
   const itemMatches = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)];
   const errors: string[] = [];
   const calverItems: Array<{ title: string; sparkleBuild: number; floors: SparkleBuildFloors }> =
     [];
 
   if (itemMatches.length === 0) {
+    if (options?.allowEmpty === true) {
+      return [];
+    }
     errors.push("appcast.xml contains no <item> entries.");
   }
 
@@ -214,14 +223,26 @@ export function collectAppcastSparkleVersionErrors(xml: string): string[] {
 }
 
 function checkAppcastSparkleVersions() {
-  const xml = readFileSync(appcastPath, "utf8");
-  const errors = collectAppcastSparkleVersionErrors(xml);
-  if (errors.length > 0) {
-    console.error("release-check: appcast sparkle version validation failed:");
-    for (const error of errors) {
-      console.error(`  - ${error}`);
+  for (const config of appcastConfigs) {
+    if (!existsSync(config.path)) {
+      if (config.required) {
+        console.error(`release-check: missing required appcast file ${config.path}`);
+        process.exit(1);
+      }
+      continue;
     }
-    process.exit(1);
+
+    const xml = readFileSync(config.path, "utf8");
+    const errors = collectAppcastSparkleVersionErrors(xml, { allowEmpty: config.allowEmpty });
+    if (errors.length > 0) {
+      console.error(
+        `release-check: ${config.path.split("/").pop() ?? config.path} sparkle version validation failed:`,
+      );
+      for (const error of errors) {
+        console.error(`  - ${error}`);
+      }
+      process.exit(1);
+    }
   }
 }
 

@@ -1,29 +1,55 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build the mac app bundle, then create a zip (Sparkle) + styled DMG (humans).
+# Build the selected mac app bundle, then create a zip (Sparkle) + styled DMG (humans).
 #
 # Output:
-# - dist/OpenClaw.app
-# - dist/OpenClaw-<version>.zip
-# - dist/OpenClaw-<version>.dmg
+# - dist/<product>.app
+# - dist/<asset-prefix>-<version>.zip
+# - dist/<asset-prefix>-<version>.dmg
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_ROOT="$ROOT_DIR/apps/macos/.build"
-PRODUCT="OpenClaw"
+MAC_APP_PRODUCT="${MAC_APP_PRODUCT:-openclaw}"
 BUILD_CONFIG="${BUILD_CONFIG:-release}"
 APP_VERSION_INPUT="${APP_VERSION:-$(cd "$ROOT_DIR" && node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0")}"
+
+case "$MAC_APP_PRODUCT" in
+  openclaw)
+    PRODUCT="OpenClaw"
+    APP="$ROOT_DIR/dist/OpenClaw.app"
+    ASSET_PREFIX="OpenClaw"
+    DEFAULT_BUNDLE_ID="ai.openclaw.mac"
+    STABLE_ALIAS_DMG=""
+    ;;
+  easy-mode)
+    PRODUCT="OpenClawEasyModeMac"
+    APP="$ROOT_DIR/dist/OpenClaw Easy Mode.app"
+    ASSET_PREFIX="OpenClaw-Easy-Mode"
+    DEFAULT_BUNDLE_ID="ai.openclaw.easymode.mac"
+    STABLE_ALIAS_DMG="$ROOT_DIR/dist/OpenClaw-Easy-Mode.dmg"
+    ;;
+  *)
+    echo "Error: unsupported MAC_APP_PRODUCT '$MAC_APP_PRODUCT' (use openclaw or easy-mode)." >&2
+    exit 1
+    ;;
+esac
 
 # Default to universal binary for distribution builds (supports both Apple Silicon and Intel Macs)
 export BUILD_ARCHS="${BUILD_ARCHS:-all}"
 export BUILD_CONFIG
+export MAC_APP_PRODUCT
 
 # Use release bundle ID (not .debug) so Sparkle auto-update works.
 # The .debug suffix in package-mac-app.sh blanks SUFeedURL intentionally for dev builds.
-export BUNDLE_ID="${BUNDLE_ID:-ai.openclaw.mac}"
+export BUNDLE_ID="${BUNDLE_ID:-$DEFAULT_BUNDLE_ID}"
 
 canonical_sparkle_build() {
   node --import tsx "$ROOT_DIR/scripts/sparkle-build.ts" canonical-build "$1"
+}
+
+is_beta_version() {
+  [[ "$1" == *"-beta."* ]]
 }
 
 # Local fallback releases must not silently fall back to a git-rev-count build number.
@@ -37,7 +63,6 @@ fi
 
 "$ROOT_DIR/scripts/package-mac-app.sh"
 
-APP="$ROOT_DIR/dist/OpenClaw.app"
 if [[ ! -d "$APP" ]]; then
   echo "Error: missing app bundle at $APP" >&2
   exit 1
@@ -47,10 +72,10 @@ VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Co
 BUNDLE_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP/Contents/Info.plist" 2>/dev/null || echo "")
 ACTUAL_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP/Contents/Info.plist" 2>/dev/null || echo "")
 ACTUAL_FEED_URL=$(/usr/libexec/PlistBuddy -c "Print SUFeedURL" "$APP/Contents/Info.plist" 2>/dev/null || echo "")
-ZIP="$ROOT_DIR/dist/OpenClaw-$VERSION.zip"
-DMG="$ROOT_DIR/dist/OpenClaw-$VERSION.dmg"
-NOTARY_ZIP="$ROOT_DIR/dist/OpenClaw-$VERSION.notary.zip"
-DSYM_ZIP="$ROOT_DIR/dist/OpenClaw-$VERSION.dSYM.zip"
+ZIP="$ROOT_DIR/dist/$ASSET_PREFIX-$VERSION.zip"
+DMG="$ROOT_DIR/dist/$ASSET_PREFIX-$VERSION.dmg"
+NOTARY_ZIP="$ROOT_DIR/dist/$ASSET_PREFIX-$VERSION.notary.zip"
+DSYM_ZIP="$ROOT_DIR/dist/$ASSET_PREFIX-$VERSION.dSYM.zip"
 SKIP_NOTARIZE="${SKIP_NOTARIZE:-0}"
 NOTARIZE=1
 SKIP_DSYM="${SKIP_DSYM:-0}"
@@ -110,6 +135,11 @@ if [[ "$SKIP_DMG" != "1" ]]; then
   fi
 else
   echo "💿 Skipping DMG (SKIP_DMG=1)"
+fi
+
+if [[ -n "$STABLE_ALIAS_DMG" && "$SKIP_DMG" != "1" && "$BUILD_CONFIG" == "release" ]] && ! is_beta_version "$VERSION"; then
+  echo "🔗 Stable alias DMG: $STABLE_ALIAS_DMG"
+  cp -f "$DMG" "$STABLE_ALIAS_DMG"
 fi
 
 if [[ "$SKIP_DSYM" != "1" ]]; then

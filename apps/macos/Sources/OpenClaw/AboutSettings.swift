@@ -1,3 +1,4 @@
+import OpenClawMacUpdates
 import SwiftUI
 
 struct AboutSettings: View {

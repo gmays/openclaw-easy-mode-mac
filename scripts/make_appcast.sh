@@ -2,8 +2,27 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-ZIP=${1:?"Usage: $0 OpenClaw-<ver>.zip"}
-FEED_URL=${2:-"https://raw.githubusercontent.com/openclaw/openclaw/main/appcast.xml"}
+MAC_APP_PRODUCT="${MAC_APP_PRODUCT:-openclaw}"
+ZIP=${1:?"Usage: MAC_APP_PRODUCT=<openclaw|easy-mode> $0 <product-zip> [feed-url]"}
+
+case "$MAC_APP_PRODUCT" in
+  openclaw)
+    ASSET_PREFIX="OpenClaw"
+    DEFAULT_FEED_URL="https://raw.githubusercontent.com/openclaw/openclaw/main/appcast.xml"
+    APPCAST_OUTPUT="$ROOT/appcast.xml"
+    ;;
+  easy-mode)
+    ASSET_PREFIX="OpenClaw-Easy-Mode"
+    DEFAULT_FEED_URL="https://raw.githubusercontent.com/openclaw/openclaw/main/appcast-easy-mode.xml"
+    APPCAST_OUTPUT="$ROOT/appcast-easy-mode.xml"
+    ;;
+  *)
+    echo "Unsupported MAC_APP_PRODUCT '$MAC_APP_PRODUCT' (use openclaw or easy-mode)." >&2
+    exit 1
+    ;;
+esac
+
+FEED_URL=${2:-"$DEFAULT_FEED_URL"}
 PRIVATE_KEY_FILE=${SPARKLE_PRIVATE_KEY_FILE:-}
 
 find_generate_appcast() {
@@ -29,8 +48,9 @@ ZIP_NAME=$(basename "$ZIP")
 ZIP_BASE="${ZIP_NAME%.zip}"
 VERSION=${SPARKLE_RELEASE_VERSION:-}
 if [[ -z "$VERSION" ]]; then
+  ASSET_PREFIX_REGEX=${ASSET_PREFIX//-/\\-}
   # Accept legacy calver suffixes like -1 and prerelease forms like -beta.1 / .beta.1.
-  if [[ "$ZIP_NAME" =~ ^OpenClaw-([0-9]+(\.[0-9]+){1,2}([-.][0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?)\.zip$ ]]; then
+  if [[ "$ZIP_NAME" =~ ^${ASSET_PREFIX_REGEX}-([0-9]+(\.[0-9]+){1,2}([-.][0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?)\.zip$ ]]; then
     VERSION="${BASH_REMATCH[1]}"
   else
     echo "Could not infer version from $ZIP_NAME; set SPARKLE_RELEASE_VERSION." >&2
@@ -47,8 +67,8 @@ cleanup() {
 }
 trap cleanup EXIT
 cp -f "$ZIP" "$TMP_DIR/$ZIP_NAME"
-if [[ -f "$ROOT/appcast.xml" ]]; then
-  cp -f "$ROOT/appcast.xml" "$TMP_DIR/appcast.xml"
+if [[ -f "$APPCAST_OUTPUT" ]]; then
+  cp -f "$APPCAST_OUTPUT" "$TMP_DIR/appcast.xml"
 fi
 
 NOTES_HTML="${ZIP_DIR}/${ZIP_BASE}.html"
@@ -75,6 +95,6 @@ fi
   --link "$FEED_URL" \
   "$TMP_DIR"
 
-cp -f "$TMP_DIR/appcast.xml" "$ROOT/appcast.xml"
+cp -f "$TMP_DIR/appcast.xml" "$APPCAST_OUTPUT"
 
-echo "Appcast generated (appcast.xml). Upload alongside $ZIP at $FEED_URL"
+echo "Appcast generated ($(basename "$APPCAST_OUTPUT")). Upload alongside $ZIP at $FEED_URL"

@@ -26,7 +26,11 @@ OpenClaw has three public release lanes:
 - `latest` means the current stable npm release
 - `beta` means the current prerelease npm release
 - Stable correction releases also publish to npm `latest`
-- Every OpenClaw release ships the npm package and macOS app together
+- Every OpenClaw release ships the npm package and macOS app artifacts together
+- Stable macOS release artifacts currently include:
+  - OpenClaw `.zip`, `.dmg`, and `.dSYM.zip`
+  - OpenClaw Easy Mode `.zip`, `.dmg`, and `.dSYM.zip`
+  - OpenClaw Easy Mode stable website alias `OpenClaw-Easy-Mode.dmg`
 
 ## Release cadence
 
@@ -56,9 +60,15 @@ OpenClaw has three public release lanes:
 - Stable macOS release readiness also includes the updater surfaces:
   - the GitHub release must end up with the packaged `.zip`, `.dmg`, and `.dSYM.zip`
   - `appcast.xml` on `main` must point at the new stable zip after publish
+  - `appcast-easy-mode.xml` on `main` must point at the new stable Easy Mode zip after publish
   - the packaged app must keep a non-debug bundle id, a non-empty Sparkle feed
     URL, and a `CFBundleVersion` at or above the canonical Sparkle build floor
     for that release version
+- OpenClaw Easy Mode stable website downloads use:
+  `https://github.com/openclaw/openclaw/releases/latest/download/OpenClaw-Easy-Mode.dmg`
+- Beta macOS releases may upload versioned Easy Mode assets to the prerelease,
+  but they must not update the stable Easy Mode DMG alias or
+  `appcast-easy-mode.xml` until a separate beta feed exists.
 
 ## Public references
 
@@ -66,6 +76,7 @@ OpenClaw has three public release lanes:
 - [`scripts/openclaw-npm-release-check.ts`](https://github.com/openclaw/openclaw/blob/main/scripts/openclaw-npm-release-check.ts)
 - [`scripts/package-mac-dist.sh`](https://github.com/openclaw/openclaw/blob/main/scripts/package-mac-dist.sh)
 - [`scripts/make_appcast.sh`](https://github.com/openclaw/openclaw/blob/main/scripts/make_appcast.sh)
+- [`appcast-easy-mode.xml`](https://github.com/openclaw/openclaw/blob/main/appcast-easy-mode.xml)
 
 Maintainers use the private release docs in
 [`openclaw/maintainers/release/README.md`](https://github.com/openclaw/maintainers/blob/main/release/README.md)

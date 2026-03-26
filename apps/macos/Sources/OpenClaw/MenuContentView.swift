@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import Foundation
 import Observation
+import OpenClawMacUpdates
 import SwiftUI
 
 /// Menu contents for the OpenClaw menu bar extra.

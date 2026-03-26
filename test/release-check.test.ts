@@ -21,6 +21,20 @@ const requiredPluginSdkPackPaths = [...listPluginSdkDistArtifacts(), "dist/plugi
 const requiredBundledPluginPackPaths = listBundledPluginPackArtifacts();
 
 describe("collectAppcastSparkleVersionErrors", () => {
+  it("accepts an empty optional feed when allowEmpty is enabled", () => {
+    expect(
+      collectAppcastSparkleVersionErrors("<rss><channel></channel></rss>", {
+        allowEmpty: true,
+      }),
+    ).toEqual([]);
+  });
+
+  it("rejects an empty required feed by default", () => {
+    expect(collectAppcastSparkleVersionErrors("<rss><channel></channel></rss>")).toEqual([
+      "appcast.xml contains no <item> entries.",
+    ]);
+  });
+
   it("accepts legacy 9-digit calver builds before lane-floor cutover", () => {
     const xml = `<rss><channel>${makeItem("2026.2.26", "202602260")}</channel></rss>`;
 

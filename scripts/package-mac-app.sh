@@ -18,6 +18,7 @@ case "$MAC_APP_PRODUCT" in
     APP_ICON_SRC="$ROOT_DIR/apps/macos/Sources/OpenClaw/Resources/OpenClaw.icns"
     BUNDLE_ID="${BUNDLE_ID:-ai.openclaw.mac.debug}"
     INCLUDE_SPARKLE=1
+    DEFAULT_SPARKLE_FEED_URL="https://raw.githubusercontent.com/openclaw/openclaw/main/appcast.xml"
     INCLUDE_CONTROL_UI=1
     INCLUDE_DEVICE_MODELS=1
     INCLUDE_MODEL_CATALOG=1
@@ -31,7 +32,8 @@ case "$MAC_APP_PRODUCT" in
     INFO_PLIST_SRC="$ROOT_DIR/apps/macos/Sources/OpenClawEasyModeMac/Resources/Info.plist"
     APP_ICON_SRC="$ROOT_DIR/apps/macos/Sources/OpenClaw/Resources/OpenClaw.icns"
     BUNDLE_ID="${BUNDLE_ID:-ai.openclaw.easymode.mac.debug}"
-    INCLUDE_SPARKLE=0
+    INCLUDE_SPARKLE=1
+    DEFAULT_SPARKLE_FEED_URL="https://raw.githubusercontent.com/openclaw/openclaw/main/appcast-easy-mode.xml"
     INCLUDE_CONTROL_UI=0
     INCLUDE_DEVICE_MODELS=0
     INCLUDE_MODEL_CATALOG=0
@@ -64,7 +66,7 @@ fi
 IFS=' ' read -r -a BUILD_ARCHS <<< "$BUILD_ARCHS_VALUE"
 PRIMARY_ARCH="${BUILD_ARCHS[0]}"
 SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-AGCY8w5vHirVfGGDGc8Szc5iuOqupZSh9pMj/Qs67XI=}"
-SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-https://raw.githubusercontent.com/openclaw/openclaw/main/appcast.xml}"
+SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-$DEFAULT_SPARKLE_FEED_URL}"
 AUTO_CHECKS=true
 if [[ "$INCLUDE_SPARKLE" != "1" || "$BUNDLE_ID" == *.debug ]]; then
   SPARKLE_FEED_URL=""

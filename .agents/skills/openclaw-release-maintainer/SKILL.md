@@ -31,14 +31,15 @@ Use this skill for release and publish-time workflow. Keep ordinary development 
   - `apps/ios/Sources/Info.plist`
   - `apps/ios/Tests/Info.plist`
   - `apps/macos/Sources/OpenClaw/Resources/Info.plist`
+  - `apps/macos/Sources/OpenClawEasyModeMac/Resources/Info.plist`
   - `docs/install/updating.md`
   - Peekaboo Xcode project and plist version fields
 - Before creating a release tag, make every version location above match the version encoded by that tag.
 - For fallback correction tags like `vYYYY.M.D-N`, the repo version locations still stay at `YYYY.M.D`.
-- “Bump version everywhere” means all version locations above except `appcast.xml`.
+- “Bump version everywhere” means all version locations above except `appcast.xml` and `appcast-easy-mode.xml`.
 - Release signing and notary credentials live outside the repo in the private maintainer docs.
 - Every OpenClaw release ships the npm package and macOS app together.
-- The production Sparkle feed lives at `https://raw.githubusercontent.com/openclaw/openclaw/main/appcast.xml`, and the canonical published file is `appcast.xml` on `main` in the `openclaw` repo.
+- The production Sparkle feeds live at `https://raw.githubusercontent.com/openclaw/openclaw/main/appcast.xml` and `https://raw.githubusercontent.com/openclaw/openclaw/main/appcast-easy-mode.xml`, and the canonical published files are `appcast.xml` and `appcast-easy-mode.xml` on `main` in the `openclaw` repo.
 - That shared production Sparkle feed is stable-only. Beta mac releases may
   upload assets to the GitHub prerelease, but they must not replace the shared
   `appcast.xml` unless a separate beta feed exists.
