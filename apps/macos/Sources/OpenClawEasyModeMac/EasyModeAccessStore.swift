@@ -78,13 +78,14 @@ final class EasyModeAccessStore {
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "Failed to access the selected folder."])
         }
-        let existingGrants = self.grants.filter { $0.path == url.path }
-        for existing in existingGrants {
-            if let activeUrl = self.activeUrls.removeValue(forKey: existing.id) {
-                activeUrl.stopAccessingSecurityScopedResource()
+        var shouldStopNewAccess = true
+        defer {
+            if shouldStopNewAccess {
+                url.stopAccessingSecurityScopedResource()
             }
         }
-        self.grants.removeAll { $0.path == url.path }
+
+        let existingGrants = self.grants.filter { $0.path == url.path }
         let bookmark = try url.bookmarkData(
             options: [.withSecurityScope],
             includingResourceValuesForKeys: nil,
@@ -93,7 +94,14 @@ final class EasyModeAccessStore {
             id: UUID(),
             path: url.path,
             bookmarkDataBase64: bookmark.base64EncodedString())
+        for existing in existingGrants {
+            if let activeUrl = self.activeUrls.removeValue(forKey: existing.id), activeUrl != url {
+                activeUrl.stopAccessingSecurityScopedResource()
+            }
+        }
+        self.grants.removeAll { $0.path == url.path }
         self.activeUrls[grant.id] = url
+        shouldStopNewAccess = false
         self.grants.append(grant)
         self.grants.sort { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending }
         self.persist()
